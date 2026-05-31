@@ -80,18 +80,19 @@ export default function HighlightQuote() {
   }
 
   if (loading) {
-    return renderStatusCard("正在刷新微信读书划线和笔记...", true)
+    return renderStatusCard("正在刷新笔记...", true)
   }
 
   if (!highlight) {
     const message =
-      result?.status === "missing_notion"
-        ? "未检测到微信读书 Notion 授权配置，请先完成微信读书授权。"
+      result?.message ||
+      (result?.status === "missing_notion"
+        ? "请先在设置中配置笔记来源。"
         : result?.status === "empty" && result.targetDate
           ? `未找到早于 ${result.targetDate} 的微信读书划线或笔记。`
           : result?.status === "error"
             ? "读取 Notion 划线失败，稍后再试。"
-            : "完成微信读书 Notion 授权后，这里会显示你的划线或笔记。"
+            : "配置笔记来源后，这里会显示你的笔记。")
 
     return renderStatusCard(message)
   }
