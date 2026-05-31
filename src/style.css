@@ -1,0 +1,273 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom Bonjourr-style Range Slider */
+.bonjourr-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(to right, #3b82f6 var(--val), #e5e7eb var(--val));
+  outline: none;
+  cursor: pointer;
+}
+
+.dark .bonjourr-slider {
+  background: linear-gradient(
+    to right,
+    #3b82f6 var(--val),
+    rgba(255, 255, 255, 0.15) var(--val)
+  );
+}
+
+.bonjourr-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 20px;
+  height: 12px;
+  border-radius: 6px;
+  background: #ffffff;
+  box-shadow:
+    0 1px 4px rgba(0, 0, 0, 0.2),
+    0 0 1px rgba(0, 0, 0, 0.1);
+  border: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.dark .bonjourr-slider::-webkit-slider-thumb {
+  background: #2a2a2a;
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow:
+    0 1px 4px rgba(0, 0, 0, 0.5),
+    0 0 1px rgba(0, 0, 0, 0.3);
+}
+
+/* Custom Bonjourr-style Switch */
+.bonjourr-switch {
+  position: relative;
+  display: inline-block;
+  height: 26px;
+  width: 59px;
+  border-radius: 16px;
+  background-color: #c6c4c7;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  overflow: visible;
+  transition: background-color 0.15s;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.dark .bonjourr-switch,
+[data-theme="dark"] .bonjourr-switch {
+  background-color: #39393d;
+}
+
+.bonjourr-switch:after {
+  content: "";
+  position: absolute;
+  height: 22px;
+  width: 34px;
+  border-radius: 100px;
+  background-color: white;
+  transition:
+    background-color 0.15s,
+    transform 0.15s;
+  left: 2px;
+  top: 50%;
+  margin-top: -11px;
+}
+
+.bonjourr-switch:checked {
+  background-color: #2bca42; /* Bonjourr var(--color-green) equivalent */
+}
+
+.bonjourr-switch:checked:after {
+  transform: translateX(21px);
+}
+
+@media only screen and (hover: hover) {
+  .bonjourr-switch:checked:hover {
+    background-color: #22c34d;
+  }
+}
+
+.notionhub-newtab-interface {
+  font-family: var(--nh-font-family);
+  font-size: var(--nh-font-size);
+  font-weight: var(--nh-font-weight);
+  font-synthesis-weight: auto;
+  text-shadow: 1px 2px 6px rgba(0, 0, 0, var(--nh-text-shadow-alpha));
+}
+
+.notionhub-newtab-interface :where(*) {
+  font-family: var(--nh-font-family) !important;
+  font-weight: var(--nh-font-weight) !important;
+  font-synthesis-weight: auto;
+}
+
+.notionhub-music-player .aplayer {
+  position: relative;
+  margin: 0;
+  border-radius: 18px;
+  overflow: hidden;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.92);
+  box-shadow: none;
+}
+
+.notionhub-music-player .aplayer::before {
+  content: "";
+  display: var(--nh-music-glass-display, block);
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: rgba(255, 255, 255, var(--nh-music-bg-alpha, 0.08));
+  backdrop-filter: blur(var(--nh-glass-blur, 24px));
+  -webkit-backdrop-filter: blur(var(--nh-glass-blur, 24px));
+  pointer-events: none;
+}
+
+.notionhub-music-player .aplayer > * {
+  position: relative;
+  z-index: 1;
+}
+
+.notionhub-music-player .aplayer .aplayer-body,
+.notionhub-music-player .aplayer .aplayer-info,
+.notionhub-music-player .aplayer .aplayer-list,
+.notionhub-music-player .aplayer .aplayer-list ol {
+  background: transparent;
+}
+
+.notionhub-music-player .aplayer .aplayer-info {
+  border-bottom-color: rgba(255, 255, 255, 0.12);
+}
+
+.notionhub-music-player .aplayer.aplayer-withlrc .aplayer-pic {
+  width: 136px;
+  height: 136px;
+}
+
+.notionhub-music-player .aplayer.aplayer-withlrc .aplayer-info {
+  height: 136px;
+  margin-left: 136px;
+  padding: 14px 18px 0 22px;
+}
+
+.notionhub-music-player .aplayer.aplayer-withlrc .aplayer-music {
+  margin: 0 0 8px;
+  height: 24px;
+}
+
+.notionhub-music-player .aplayer.aplayer-withlrc .aplayer-controller {
+  margin-top: 24px;
+}
+
+.notionhub-music-player .aplayer.aplayer-withlrc .aplayer-lrc {
+  height: 36px;
+  margin: 0 0 8px;
+}
+
+.notionhub-music-player .aplayer .aplayer-lrc:before,
+.notionhub-music-player .aplayer .aplayer-lrc:after {
+  display: none;
+}
+
+.notionhub-music-player .aplayer .aplayer-lrc p {
+  color: rgba(255, 255, 255, 0.8) !important;
+  font-size: 14px;
+  line-height: 16px !important;
+  height: 16px !important;
+  opacity: 0.42;
+  text-shadow:
+    0 1px 4px rgba(0, 0, 0, 0.7),
+    0 2px 10px rgba(0, 0, 0, 0.3) !important;
+}
+
+.notionhub-music-player .aplayer .aplayer-lrc p.aplayer-lrc-current {
+  color: #ffffff !important;
+  font-weight: 700 !important;
+  opacity: 1;
+  text-shadow:
+    0 1px 5px rgba(0, 0, 0, 0.8),
+    0 2px 12px rgba(0, 0, 0, 0.4) !important;
+}
+
+.notionhub-music-player .aplayer .aplayer-list ol li {
+  border-top-color: rgba(255, 255, 255, 0.1);
+}
+
+.notionhub-music-player .aplayer .aplayer-list ol li:hover,
+.notionhub-music-player .aplayer .aplayer-list ol li.aplayer-list-light {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.notionhub-music-player .aplayer .aplayer-list ol li .aplayer-list-index,
+.notionhub-music-player .aplayer .aplayer-time,
+.notionhub-music-player .aplayer .aplayer-time-inner,
+.notionhub-music-player .aplayer .aplayer-icon {
+  color: rgba(255, 255, 255, 0.85) !important;
+}
+
+.notionhub-music-player .aplayer .aplayer-icon path {
+  fill: rgba(255, 255, 255, 0.85) !important;
+}
+
+.notionhub-music-player .aplayer .aplayer-icon:hover path {
+  fill: #ffffff !important;
+}
+
+.notionhub-music-player .aplayer .aplayer-music .aplayer-author {
+  color: rgba(255, 255, 255, 0.85) !important;
+  font-size: 15px;
+  font-weight: 500;
+  text-shadow: 0 1px 5px rgba(0, 0, 0, 0.5);
+}
+
+.notionhub-music-player .aplayer .aplayer-list ol li .aplayer-list-author {
+  color: rgba(255, 255, 255, 0.8) !important;
+  font-weight: 500;
+}
+
+.notionhub-music-player .aplayer .aplayer-music .aplayer-title,
+.notionhub-music-player .aplayer .aplayer-list ol li .aplayer-list-title {
+  color: #ffffff !important;
+}
+
+.notionhub-music-player .aplayer .aplayer-music .aplayer-title {
+  font-size: 18px;
+  font-weight: 600;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.6);
+}
+
+.notionhub-music-player .aplayer .aplayer-list {
+  border-top-color: rgba(255, 255, 255, 0.12);
+}
+
+.notionhub-music-player
+  .aplayer
+  .aplayer-volume-wrap
+  .aplayer-volume-bar-wrap
+  .aplayer-volume-bar {
+  background: rgba(255, 255, 255, 0.3) !important;
+}
+
+.notionhub-music-player
+  .aplayer
+  .aplayer-volume-wrap
+  .aplayer-volume-bar-wrap
+  .aplayer-volume-bar
+  .aplayer-volume {
+  background: #ffffff !important;
+}
+
+.notionhub-music-player .aplayer .aplayer-button {
+  text-shadow: none !important;
+}
+
+.notionhub-music-player .aplayer .aplayer-button path {
+  fill: #ffffff !important;
+}
