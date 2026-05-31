@@ -1,5 +1,5 @@
-import { RefreshCw, X } from "lucide-react"
-import React, { useState } from "react"
+import { ExternalLink, RefreshCw, X } from "lucide-react"
+import React, { useEffect, useState } from "react"
 
 import { fetchNotionProperties, type NotionPropertySchema } from "../lib/api"
 import { clearMusicPlayerCache } from "../lib/music"
@@ -137,7 +137,7 @@ function PropertySelect({
     <SelectBox value={value} onChange={onChange}>
       {optional && <option value="">不选择</option>}
       {!properties.length && (
-        <option value={value}>{value || "请先读取字段"}</option>
+        <option value={value}>{value || "未读取到字段"}</option>
       )}
       {properties.map((property) => (
         <option key={property.name} value={property.name}>
@@ -203,7 +203,7 @@ export default function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
     })
   }
 
-  const loadSchema = async (target: NotionSchemaTarget) => {
+  const getSchemaCredentials = (target: NotionSchemaTarget) => {
     const token =
       target === "background"
         ? settings.backgroundNotionToken
@@ -217,8 +217,23 @@ export default function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
           ? settings.notesNotionDatabaseId
           : settings.musicNotionDatabaseId
 
+    return {
+      token: token.trim(),
+      databaseId: databaseId.trim()
+    }
+  }
+
+  const clearProperties = (target: NotionSchemaTarget) => {
+    if (target === "background") setBackgroundProperties([])
+    if (target === "notes") setNotesProperties([])
+    if (target === "music") setMusicProperties([])
+  }
+
+  const loadSchema = async (target: NotionSchemaTarget) => {
+    const { token, databaseId } = getSchemaCredentials(target)
+
     if (!token || !databaseId) {
-      setSchemaError("请先填写 Notion token 和数据库 ID。")
+      clearProperties(target)
       return
     }
 
@@ -247,6 +262,76 @@ export default function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
           )
         ? settings.backgroundProvider
         : "bing"
+
+  useEffect(() => {
+    if (backgroundProvider !== "notion") {
+      setBackgroundProperties([])
+      return
+    }
+
+    const { token, databaseId } = getSchemaCredentials("background")
+    if (!token || !databaseId) {
+      setBackgroundProperties([])
+      return
+    }
+
+    void loadSchema("background")
+  }, [
+    backgroundProvider,
+    settings.backgroundNotionToken,
+    settings.backgroundNotionDatabaseId
+  ])
+
+  useEffect(() => {
+    if (settings.notesSource !== "notion") {
+      setNotesProperties([])
+      return
+    }
+
+    const { token, databaseId } = getSchemaCredentials("notes")
+    if (!token || !databaseId) {
+      setNotesProperties([])
+      return
+    }
+
+    void loadSchema("notes")
+  }, [
+    settings.notesSource,
+    settings.notesNotionToken,
+    settings.notesNotionDatabaseId
+  ])
+
+  useEffect(() => {
+    if (!settings.showMusicPlayer) {
+      setMusicProperties([])
+      return
+    }
+
+    const { token, databaseId } = getSchemaCredentials("music")
+    if (!token || !databaseId) {
+      setMusicProperties([])
+      return
+    }
+
+    void loadSchema("music")
+  }, [
+    settings.showMusicPlayer,
+    settings.musicNotionToken,
+    settings.musicNotionDatabaseId
+  ])
+
+  const renderSchemaStatus = (target: NotionSchemaTarget) => {
+    if (loadingSchema !== target) return null
+
+    return (
+      <Row label="字段">
+        <div className="flex items-center gap-2 text-sm text-base-content/50">
+          <RefreshCw size={14} className="animate-spin" />
+          <span>正在读取...</span>
+        </div>
+      </Row>
+    )
+  }
 
   return (
     <>
@@ -448,27 +533,21 @@ export default function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
                 </Row>
                 {settings.backgroundNotionImageSource === "files" && (
                   <>
-                    <Row label="读取字段">
-                      <button
-                        className="btn btn-sm btn-ghost font-normal px-3"
-                        onClick={() => loadSchema("background")}
-                        disabled={loadingSchema === "background"}>
-                        {loadingSchema === "background" ? (
-                          <RefreshCw size={14} className="animate-spin" />
-                        ) : (
-                          "读取"
-                        )}
-                      </button>
-                    </Row>
-                    <Row label="文件属性">
-                      <PropertySelect
-                        value={settings.backgroundNotionFilesProperty}
-                        properties={backgroundProperties}
-                        onChange={(value) =>
-                          updateSetting("backgroundNotionFilesProperty", value)
-                        }
-                      />
-                    </Row>
+                    {renderSchemaStatus("background")}
+                    {backgroundProperties.length > 0 && (
+                      <Row label="文件属性">
+                        <PropertySelect
+                          value={settings.backgroundNotionFilesProperty}
+                          properties={backgroundProperties}
+                          onChange={(value) =>
+                            updateSetting(
+                              "backgroundNotionFilesProperty",
+                              value
+                            )
+                          }
+                        />
+                      </Row>
+                    )}
                   </>
                 )}
               </>
@@ -597,75 +676,83 @@ export default function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
                     }
                   />
                 </Row>
-                <Row label="读取字段">
-                  <button
-                    className="btn btn-sm btn-ghost font-normal px-3"
-                    onClick={() => loadSchema("notes")}
-                    disabled={loadingSchema === "notes"}>
-                    {loadingSchema === "notes" ? (
-                      <RefreshCw size={14} className="animate-spin" />
-                    ) : (
-                      "读取"
-                    )}
-                  </button>
-                </Row>
-                <Row label="内容属性">
-                  <PropertySelect
-                    value={settings.notesContentProperty}
-                    properties={notesProperties}
-                    onChange={(value) =>
-                      updateSetting("notesContentProperty", value)
-                    }
-                  />
-                </Row>
-                <Row label="标题属性">
-                  <PropertySelect
-                    optional
-                    value={settings.notesTitleProperty}
-                    properties={notesProperties}
-                    onChange={(value) =>
-                      updateSetting("notesTitleProperty", value)
-                    }
-                  />
-                </Row>
-                <Row label="来源属性">
-                  <PropertySelect
-                    optional
-                    value={settings.notesSourceProperty}
-                    properties={notesProperties}
-                    onChange={(value) =>
-                      updateSetting("notesSourceProperty", value)
-                    }
-                  />
-                </Row>
-                <Row label="日期属性">
-                  <PropertySelect
-                    optional
-                    value={settings.notesDateProperty}
-                    properties={notesProperties}
-                    onChange={(value) =>
-                      updateSetting("notesDateProperty", value)
-                    }
-                  />
-                </Row>
-                <Row label="封面属性">
-                  <PropertySelect
-                    optional
-                    value={settings.notesCoverProperty}
-                    properties={notesProperties}
-                    onChange={(value) =>
-                      updateSetting("notesCoverProperty", value)
-                    }
-                  />
-                </Row>
+                {renderSchemaStatus("notes")}
+                {notesProperties.length > 0 && (
+                  <>
+                    <Row label="内容属性">
+                      <PropertySelect
+                        value={settings.notesContentProperty}
+                        properties={notesProperties}
+                        onChange={(value) =>
+                          updateSetting("notesContentProperty", value)
+                        }
+                      />
+                    </Row>
+                    <Row label="标题属性">
+                      <PropertySelect
+                        optional
+                        value={settings.notesTitleProperty}
+                        properties={notesProperties}
+                        onChange={(value) =>
+                          updateSetting("notesTitleProperty", value)
+                        }
+                      />
+                    </Row>
+                    <Row label="来源属性">
+                      <PropertySelect
+                        optional
+                        value={settings.notesSourceProperty}
+                        properties={notesProperties}
+                        onChange={(value) =>
+                          updateSetting("notesSourceProperty", value)
+                        }
+                      />
+                    </Row>
+                    <Row label="日期属性">
+                      <PropertySelect
+                        optional
+                        value={settings.notesDateProperty}
+                        properties={notesProperties}
+                        onChange={(value) =>
+                          updateSetting("notesDateProperty", value)
+                        }
+                      />
+                    </Row>
+                    <Row label="封面属性">
+                      <PropertySelect
+                        optional
+                        value={settings.notesCoverProperty}
+                        properties={notesProperties}
+                        onChange={(value) =>
+                          updateSetting("notesCoverProperty", value)
+                        }
+                      />
+                    </Row>
+                  </>
+                )}
               </>
             ) : (
               <Row label="微信读书 Key">
-                <TextInput
-                  value={settings.wereadApiKey}
-                  placeholder="Bearer token"
-                  onChange={(value) => updateSetting("wereadApiKey", value)}
-                />
+                <div className="flex items-center gap-2 min-w-0">
+                  <TextInput
+                    value={settings.wereadApiKey}
+                    placeholder="Bearer token"
+                    onChange={(value) => updateSetting("wereadApiKey", value)}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-ghost h-8 min-h-8 px-2 text-base-content/60 hover:text-base-content"
+                    onClick={() =>
+                      window.open(
+                        "https://www.notionhub.app/docs/weread.html",
+                        "_blank",
+                        "noopener,noreferrer"
+                      )
+                    }>
+                    <ExternalLink size={14} />
+                    文档
+                  </button>
+                </div>
               </Row>
             )}
             <Row label="显示封面">
@@ -770,66 +857,59 @@ export default function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
                     }
                   />
                 </Row>
-                <Row label="读取字段">
-                  <button
-                    className="btn btn-sm btn-ghost font-normal px-3"
-                    onClick={() => loadSchema("music")}
-                    disabled={loadingSchema === "music"}>
-                    {loadingSchema === "music" ? (
-                      <RefreshCw size={14} className="animate-spin" />
-                    ) : (
-                      "读取"
-                    )}
-                  </button>
-                </Row>
-                <Row label="歌曲属性">
-                  <PropertySelect
-                    value={settings.musicTitleProperty}
-                    properties={musicProperties}
-                    onChange={(value) =>
-                      updateSetting("musicTitleProperty", value)
-                    }
-                  />
-                </Row>
-                <Row label="音频属性">
-                  <PropertySelect
-                    value={settings.musicAudioProperty}
-                    properties={musicProperties}
-                    onChange={(value) =>
-                      updateSetting("musicAudioProperty", value)
-                    }
-                  />
-                </Row>
-                <Row label="歌词属性">
-                  <PropertySelect
-                    optional
-                    value={settings.musicLyricsProperty}
-                    properties={musicProperties}
-                    onChange={(value) =>
-                      updateSetting("musicLyricsProperty", value)
-                    }
-                  />
-                </Row>
-                <Row label="封面属性">
-                  <PropertySelect
-                    optional
-                    value={settings.musicCoverProperty}
-                    properties={musicProperties}
-                    onChange={(value) =>
-                      updateSetting("musicCoverProperty", value)
-                    }
-                  />
-                </Row>
-                <Row label="歌手属性">
-                  <PropertySelect
-                    optional
-                    value={settings.musicArtistProperty}
-                    properties={musicProperties}
-                    onChange={(value) =>
-                      updateSetting("musicArtistProperty", value)
-                    }
-                  />
-                </Row>
+                {renderSchemaStatus("music")}
+                {musicProperties.length > 0 && (
+                  <>
+                    <Row label="歌曲属性">
+                      <PropertySelect
+                        value={settings.musicTitleProperty}
+                        properties={musicProperties}
+                        onChange={(value) =>
+                          updateSetting("musicTitleProperty", value)
+                        }
+                      />
+                    </Row>
+                    <Row label="音频属性">
+                      <PropertySelect
+                        value={settings.musicAudioProperty}
+                        properties={musicProperties}
+                        onChange={(value) =>
+                          updateSetting("musicAudioProperty", value)
+                        }
+                      />
+                    </Row>
+                    <Row label="歌词属性">
+                      <PropertySelect
+                        optional
+                        value={settings.musicLyricsProperty}
+                        properties={musicProperties}
+                        onChange={(value) =>
+                          updateSetting("musicLyricsProperty", value)
+                        }
+                      />
+                    </Row>
+                    <Row label="封面属性">
+                      <PropertySelect
+                        optional
+                        value={settings.musicCoverProperty}
+                        properties={musicProperties}
+                        onChange={(value) =>
+                          updateSetting("musicCoverProperty", value)
+                        }
+                      />
+                    </Row>
+                    <Row label="歌手属性">
+                      <PropertySelect
+                        optional
+                        value={settings.musicArtistProperty}
+                        properties={musicProperties}
+                        onChange={(value) =>
+                          updateSetting("musicArtistProperty", value)
+                        }
+                      />
+                    </Row>
+                  </>
+                )}
                 <Row label="背景模糊度">
                   <input
                     type="range"
