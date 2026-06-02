@@ -1,4 +1,4 @@
-import { ExternalLink, RefreshCw, X } from "lucide-react"
+import { CircleHelp, Eye, EyeOff, RefreshCw, X } from "lucide-react"
 import React, { useEffect, useState } from "react"
 
 import { fetchNotionProperties, type NotionPropertySchema } from "../lib/api"
@@ -103,16 +103,18 @@ function SelectBox({
 function TextInput({
   value,
   onChange,
-  placeholder = ""
+  placeholder = "",
+  type = "text"
 }: {
   value: string
   onChange: (value: string) => void
   placeholder?: string
+  type?: React.HTMLInputTypeAttribute
 }) {
   return (
     <div className="bg-base-200/50 rounded-lg px-2 flex items-center h-8 ml-4 min-w-0">
       <input
-        type="text"
+        type={type}
         className="input input-sm w-full max-w-[210px] text-[14px] bg-transparent focus:outline-none border-none font-normal px-1 text-right placeholder-base-content/30"
         placeholder={placeholder}
         value={value}
@@ -152,10 +154,10 @@ export default function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
   const [settings, setSettings] = useNewTabSettings()
   const [clearingCache, setClearingCache] = useState(false)
   const [clearedCache, setClearedCache] = useState(false)
+  const [showWereadKey, setShowWereadKey] = useState(false)
   const [loadingSchema, setLoadingSchema] = useState<NotionSchemaTarget | null>(
     null
   )
-  const [schemaError, setSchemaError] = useState("")
   const [backgroundProperties, setBackgroundProperties] = useState<
     NotionPropertySchema[]
   >([])
@@ -237,7 +239,6 @@ export default function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
       return
     }
 
-    setSchemaError("")
     setLoadingSchema(target)
     try {
       const properties = await fetchNotionProperties(token, databaseId)
@@ -246,7 +247,7 @@ export default function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
       if (target === "music") setMusicProperties(properties)
     } catch (error) {
       console.warn("[NotionHub Tab] Failed to load Notion schema:", error)
-      setSchemaError("读取 Notion 字段失败，请检查 token、数据库 ID 和权限。")
+      clearProperties(target)
     } finally {
       setLoadingSchema(null)
     }
@@ -736,12 +737,25 @@ export default function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
                 <div className="flex items-center gap-2 min-w-0">
                   <TextInput
                     value={settings.wereadApiKey}
-                    placeholder="Bearer token"
+                    placeholder="wrk-..."
+                    type={showWereadKey ? "text" : "password"}
                     onChange={(value) => updateSetting("wereadApiKey", value)}
                   />
                   <button
                     type="button"
-                    className="btn btn-sm btn-ghost h-8 min-h-8 px-2 text-base-content/60 hover:text-base-content"
+                    className="btn btn-circle btn-xs btn-ghost h-8 min-h-8 w-8 p-0 text-base-content/60 hover:text-base-content"
+                    aria-label={
+                      showWereadKey ? "隐藏微信读书 Key" : "显示微信读书 Key"
+                    }
+                    title={showWereadKey ? "隐藏 Key" : "显示 Key"}
+                    onClick={() => setShowWereadKey((value) => !value)}>
+                    {showWereadKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-circle btn-xs btn-ghost h-8 min-h-8 w-8 p-0 text-base-content/60 hover:text-base-content"
+                    aria-label="查看微信读书 Key 文档"
+                    title="查看文档"
                     onClick={() =>
                       window.open(
                         "https://www.notionhub.app/docs/weread.html",
@@ -749,8 +763,7 @@ export default function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
                         "noopener,noreferrer"
                       )
                     }>
-                    <ExternalLink size={14} />
-                    文档
+                    <CircleHelp size={16} />
                   </button>
                 </div>
               </Row>
@@ -1015,12 +1028,6 @@ export default function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
               />
             </Row>
           </Card>
-
-          {schemaError && (
-            <div className="mx-5 mb-4 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-500">
-              {schemaError}
-            </div>
-          )}
 
           <div className="mx-5 mb-8 rounded-2xl border border-base-content/5 bg-base-100/70 px-4 py-4 text-sm leading-6 text-base-content/60">
             如果你想自动把微信读书、网易云音乐、flomo 等同步到 Notion，可以使用

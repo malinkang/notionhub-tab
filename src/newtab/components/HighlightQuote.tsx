@@ -30,8 +30,25 @@ export default function HighlightQuote() {
   }
 
   useEffect(() => {
-    refreshHighlight()
-  }, [])
+    if (!settings) return
+
+    const timer = window.setTimeout(() => {
+      refreshHighlight()
+    }, 500)
+
+    return () => window.clearTimeout(timer)
+  }, [
+    settings?.showHighlights,
+    settings?.notesSource,
+    settings?.wereadApiKey,
+    settings?.notesNotionToken,
+    settings?.notesNotionDatabaseId,
+    settings?.notesContentProperty,
+    settings?.notesTitleProperty,
+    settings?.notesSourceProperty,
+    settings?.notesDateProperty,
+    settings?.notesCoverProperty
+  ])
 
   const openHighlight = () => {
     if (!highlight?.notionUrl) return

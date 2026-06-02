@@ -1,7 +1,7 @@
 {
   "name": "notionhub-tab",
   "displayName": "NotionHub Tab",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Use your Notion databases, WeRead notes, and music library as a browser new tab.",
   "author": "linkang.ma@gmail.com",
   "scripts": {

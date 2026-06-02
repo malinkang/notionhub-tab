@@ -6,6 +6,9 @@ import {
 
 const NOTION_VERSION = "2025-09-03"
 const NOTION_PAGE_SIZE = 50
+const WEREAD_GATEWAY_URL = "https://i.weread.qq.com/api/agent/gateway"
+const WEREAD_SKILL_VERSION = "1.0.3"
+const WEREAD_FALLBACK_COVER = "https://www.notion.so/icons/book_gray.svg"
 
 export interface Highlight {
   text: string
@@ -82,7 +85,11 @@ type WeReadBookmark = {
   markText?: string
   review?: string
   abstract?: string
+  content?: string
+  chapterUid?: number | string
+  range?: string
   book?: {
+    bookId?: string
     title?: string
     author?: string
     cover?: string
@@ -91,6 +98,27 @@ type WeReadBookmark = {
   title?: string
   author?: string
   cover?: string
+}
+
+type WeReadNotebookBook = {
+  bookId?: string
+  book?: {
+    bookId?: string
+    title?: string
+    author?: string
+    cover?: string
+  }
+  title?: string
+  author?: string
+  cover?: string
+}
+
+type WeReadReviewItem = {
+  review?: WeReadBookmark & {
+    reviewId?: string
+    bookId?: string
+  }
+  book?: WeReadBookmark["book"]
 }
 
 async function getSettings(): Promise<NewTabSettings> {
@@ -322,22 +350,46 @@ async function getNotionHighlightResult(
   }
 }
 
-async function fetchWeReadJson<T>(apiKey: string, path: string): Promise<T> {
-  const response = await fetch(`https://i.weread.qq.com${path}`, {
+async function fetchWeReadGateway<T>(
+  apiKey: string,
+  apiName: string,
+  params: Record<string, unknown> = {}
+): Promise<T> {
+  const response = await fetch(WEREAD_GATEWAY_URL, {
+    method: "POST",
     headers: {
-      Authorization: `Bearer ${apiKey}`
-    }
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      api_name: apiName,
+      skill_version: WEREAD_SKILL_VERSION,
+      ...params
+    })
   })
 
   if (!response.ok) {
     throw new Error(`WeRead API ${response.status}`)
   }
 
-  return (await response.json()) as T
+  const data = (await response.json()) as T & {
+    errcode?: number
+    errmsg?: string
+    upgrade_info?: { message?: string }
+  }
+  if (data.upgrade_info?.message) {
+    throw new Error(data.upgrade_info.message)
+  }
+  if (data.errcode && data.errcode !== 0) {
+    throw new Error(data.errmsg || `WeRead API ${data.errcode}`)
+  }
+
+  return data
 }
 
 function normalizeWeReadHighlight(item: WeReadBookmark): Highlight | null {
-  const text = item.markText || item.review || item.abstract || ""
+  const text =
+    item.markText || item.review || item.content || item.abstract || ""
   const book = item.book?.title || item.title || "微信读书"
   if (!text) return null
 
@@ -345,16 +397,157 @@ function normalizeWeReadHighlight(item: WeReadBookmark): Highlight | null {
     text,
     originalText: item.abstract && item.review ? item.abstract : undefined,
     book,
-    bookUrl: item.bookId
-      ? `https://weread.qq.com/web/reader/${item.bookId}`
-      : undefined,
-    cover: item.book?.cover || item.cover,
+    bookUrl: item.bookId ? getWeReadBookUrl(item.bookId) : undefined,
+    cover: normalizeWeReadCover(item.book?.cover || item.cover),
     author: item.book?.author || item.author || "",
     kind: item.review ? "review" : "bookmark",
-    notionUrl: item.bookId
-      ? `https://weread.qq.com/web/reader/${item.bookId}`
-      : "https://weread.qq.com"
+    notionUrl: getWeReadBookUrl(item.bookId)
   }
+}
+
+function normalizeWeReadCover(cover?: string): string {
+  const normalized = (cover || "").replace("/s_", "/t7_").trim()
+  if (!normalized || !normalized.startsWith("http")) {
+    return WEREAD_FALLBACK_COVER
+  }
+
+  return normalized
+}
+
+function leftRotate(value: number, amount: number): number {
+  return ((value << amount) | (value >>> (32 - amount))) >>> 0
+}
+
+function md5(input: string): string {
+  const bytes = new TextEncoder().encode(input)
+  const bitLength = bytes.length * 8
+  const paddedLength = (((bytes.length + 8) >> 6) + 1) * 64
+  const buffer = new Uint8Array(paddedLength)
+  buffer.set(bytes)
+  buffer[bytes.length] = 0x80
+
+  const view = new DataView(buffer.buffer)
+  view.setUint32(paddedLength - 8, bitLength >>> 0, true)
+  view.setUint32(paddedLength - 4, Math.floor(bitLength / 0x100000000), true)
+
+  let a0 = 0x67452301
+  let b0 = 0xefcdab89
+  let c0 = 0x98badcfe
+  let d0 = 0x10325476
+  const shifts = [
+    7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 5, 9, 14, 20, 5,
+    9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11,
+    16, 23, 4, 11, 16, 23, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10,
+    15, 21
+  ]
+  const constants = Array.from({ length: 64 }, (_, index) =>
+    Math.floor(Math.abs(Math.sin(index + 1)) * 0x100000000)
+  )
+
+  for (let offset = 0; offset < paddedLength; offset += 64) {
+    const words = Array.from({ length: 16 }, (_, index) =>
+      view.getUint32(offset + index * 4, true)
+    )
+    let a = a0
+    let b = b0
+    let c = c0
+    let d = d0
+
+    for (let i = 0; i < 64; i++) {
+      let f: number
+      let g: number
+      if (i < 16) {
+        f = (b & c) | (~b & d)
+        g = i
+      } else if (i < 32) {
+        f = (d & b) | (~d & c)
+        g = (5 * i + 1) % 16
+      } else if (i < 48) {
+        f = b ^ c ^ d
+        g = (3 * i + 5) % 16
+      } else {
+        f = c ^ (b | ~d)
+        g = (7 * i) % 16
+      }
+
+      const next = d
+      d = c
+      c = b
+      b =
+        (b + leftRotate((a + f + constants[i] + words[g]) >>> 0, shifts[i])) >>>
+        0
+      a = next
+    }
+
+    a0 = (a0 + a) >>> 0
+    b0 = (b0 + b) >>> 0
+    c0 = (c0 + c) >>> 0
+    d0 = (d0 + d) >>> 0
+  }
+
+  return [a0, b0, c0, d0]
+    .map((word) =>
+      [0, 8, 16, 24]
+        .map((shift) => ((word >>> shift) & 0xff).toString(16).padStart(2, "0"))
+        .join("")
+    )
+    .join("")
+}
+
+function transformWeReadBookId(bookId: string): [string, string[]] {
+  if (/^\d*$/.test(bookId)) {
+    const chunks: string[] = []
+    for (let index = 0; index < bookId.length; index += 9) {
+      chunks.push(Number(bookId.slice(index, index + 9)).toString(16))
+    }
+    return ["3", chunks]
+  }
+
+  const encoded = Array.from(bookId)
+    .map((char) => char.codePointAt(0)?.toString(16) || "")
+    .join("")
+  return ["4", [encoded]]
+}
+
+function calculateWeReadBookStrId(bookId: string): string {
+  const digest = md5(bookId)
+  const [code, transformedIds] = transformWeReadBookId(bookId)
+  let result = `${digest.slice(0, 3)}${code}2${digest.slice(-2)}`
+
+  transformedIds.forEach((transformedId, index) => {
+    result += transformedId.length.toString(16).padStart(2, "0") + transformedId
+    if (index < transformedIds.length - 1) result += "g"
+  })
+
+  if (result.length < 20) {
+    result += digest.slice(0, 20 - result.length)
+  }
+
+  return result + md5(result).slice(0, 3)
+}
+
+function getWeReadBookUrl(bookId?: string): string {
+  if (!bookId) return "https://weread.qq.com"
+  return `https://weread.qq.com/web/reader/${calculateWeReadBookStrId(bookId)}`
+}
+
+function normalizeWeReadReview(
+  item: WeReadReviewItem,
+  bookInfo: WeReadNotebookBook
+): Highlight | null {
+  const review = item.review
+  if (!review?.content) return null
+
+  return normalizeWeReadHighlight({
+    ...review,
+    review: review.content,
+    abstract: review.abstract,
+    book: item.book || bookInfo.book,
+    bookId: review.bookId || bookInfo.bookId || bookInfo.book?.bookId,
+    title: bookInfo.title,
+    author: bookInfo.author,
+    cover: bookInfo.cover || bookInfo.book?.cover
+  })
 }
 
 async function getWeReadHighlightResult(
@@ -368,14 +561,9 @@ async function getWeReadHighlightResult(
     }
   }
 
-  const notebooks = await fetchWeReadJson<{
-    books?: Array<{
-      bookId?: string
-      title?: string
-      author?: string
-      cover?: string
-    }>
-  }>(settings.wereadApiKey, "/web/book/bookmarklist")
+  const notebooks = await fetchWeReadGateway<{
+    books?: WeReadNotebookBook[]
+  }>(settings.wereadApiKey, "/user/notebooks", { count: 20 })
 
   const items: Highlight[] = []
   const books = Array.isArray(notebooks.books)
@@ -383,15 +571,14 @@ async function getWeReadHighlightResult(
     : []
 
   for (const book of books) {
-    if (!book.bookId) continue
+    const bookId = book.bookId || book.book?.bookId
+    if (!bookId) continue
     try {
-      const data = await fetchWeReadJson<{
+      const data = await fetchWeReadGateway<{
         updated?: WeReadBookmark[]
         chapters?: Array<{ bookmarks?: WeReadBookmark[] }>
-      }>(
-        settings.wereadApiKey,
-        `/web/book/bookmarklist?bookId=${encodeURIComponent(book.bookId)}`
-      )
+        book?: WeReadBookmark["book"]
+      }>(settings.wereadApiKey, "/book/bookmarklist", { bookId })
       const bookmarks = [
         ...(data.updated || []),
         ...(data.chapters || []).flatMap((chapter) => chapter.bookmarks || [])
@@ -399,13 +586,31 @@ async function getWeReadHighlightResult(
       for (const item of bookmarks) {
         const normalized = normalizeWeReadHighlight({
           ...item,
-          book: item.book || book,
-          bookId: item.bookId || book.bookId
+          book: item.book || data.book || book.book,
+          bookId: item.bookId || bookId,
+          title: book.title,
+          author: book.author,
+          cover: book.cover || book.book?.cover
         })
         if (normalized) items.push(normalized)
       }
     } catch {
       // Keep reading other books when one WeRead request fails.
+    }
+
+    try {
+      const reviews = await fetchWeReadGateway<{
+        reviews?: WeReadReviewItem[]
+      }>(settings.wereadApiKey, "/review/list/mine", {
+        bookid: bookId,
+        count: 20
+      })
+      for (const item of reviews.reviews || []) {
+        const normalized = normalizeWeReadReview(item, book)
+        if (normalized) items.push(normalized)
+      }
+    } catch {
+      // Reviews are optional; keep showing underlines when review loading fails.
     }
   }
 
