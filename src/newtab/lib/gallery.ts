@@ -23,6 +23,16 @@ export interface MovieItem {
   notionUrl?: string
 }
 
+export interface WeReadReadingStats {
+  weeklySeconds: number
+  weeklyFormatted: string
+  weeklyDays: number
+  monthlySeconds: number
+  monthlyFormatted: string
+  monthlyDays: number
+  rankText?: string
+}
+
 export interface BookItem {
   id: string
   title: string
@@ -198,6 +208,17 @@ export async function fetchMoviesList(
   }
 }
 
+export function formatReadingDuration(seconds?: number): string {
+  if (!seconds || seconds <= 0) return "0分钟"
+  const hours = Math.floor(seconds / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
+
+  if (hours > 0) {
+    return minutes > 0 ? `${hours}小时${minutes}分钟` : `${hours}小时`
+  }
+  return `${minutes || 1}分钟`
+}
+
 // ==================== 微信读书书架数据拉取 ====================
 export async function fetchWeReadBooksList(
   settings: NewTabSettings
@@ -205,6 +226,7 @@ export async function fetchWeReadBooksList(
   items: BookItem[]
   hasMore: boolean
   nextCursor?: string | null
+  readingStats?: WeReadReadingStats
   error?: string
 }> {
   const apiKey = settings.wereadApiKey?.trim()
@@ -213,26 +235,86 @@ export async function fetchWeReadBooksList(
   }
 
   try {
-    const response = await fetch("https://i.weread.qq.com/api/agent/gateway", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        api_name: "/user/notebooks",
-        skill_version: "1.0.4",
-        count: 100
-      })
-    })
+    const [notebooksResult, weeklyResult, monthlyResult] =
+      await Promise.allSettled([
+        fetch("https://i.weread.qq.com/api/agent/gateway", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            api_name: "/user/notebooks",
+            skill_version: "1.0.4",
+            count: 100
+          })
+        }),
+        fetch("https://i.weread.qq.com/api/agent/gateway", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            api_name: "/readdata/detail",
+            skill_version: "1.0.4",
+            mode: "weekly"
+          })
+        }),
+        fetch("https://i.weread.qq.com/api/agent/gateway", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            api_name: "/readdata/detail",
+            skill_version: "1.0.4",
+            mode: "monthly"
+          })
+        })
+      ])
 
-    if (!response.ok) {
-      throw new Error(`微信读书服务响应异常: ${response.status}`)
+    if (notebooksResult.status !== "fulfilled" || !notebooksResult.value.ok) {
+      throw new Error("微信读书笔记本服务响应异常")
     }
 
-    const data = await response.json()
+    const data = await notebooksResult.value.json()
     if (data.errcode && data.errcode !== 0) {
       throw new Error(data.errmsg || `微信读书接口返回错误码 ${data.errcode}`)
+    }
+
+    // 解析统计数据
+    let readingStats: WeReadReadingStats | undefined
+    try {
+      let weeklyData: any = {}
+      let monthlyData: any = {}
+      if (weeklyResult.status === "fulfilled" && weeklyResult.value.ok) {
+        weeklyData = await weeklyResult.value.json()
+      }
+      if (monthlyResult.status === "fulfilled" && monthlyResult.value.ok) {
+        monthlyData = await monthlyResult.value.json()
+      }
+
+      const weeklySeconds = Number(weeklyData.totalReadTime) || 0
+      const monthlySeconds = Number(monthlyData.totalReadTime) || 0
+      const weeklyDays = Number(weeklyData.readDays) || 0
+      const monthlyDays = Number(monthlyData.readDays) || 0
+      const rankText = weeklyData.rank?.text || undefined
+
+      if (weeklySeconds > 0 || monthlySeconds > 0 || weeklyDays > 0) {
+        readingStats = {
+          weeklySeconds,
+          weeklyFormatted: formatReadingDuration(weeklySeconds),
+          weeklyDays,
+          monthlySeconds,
+          monthlyFormatted: formatReadingDuration(monthlySeconds),
+          monthlyDays,
+          rankText
+        }
+      }
+    } catch {
+      // 忽略统计数据解析容错
     }
 
     const rawBooks = Array.isArray(data.books) ? data.books : []
@@ -293,7 +375,8 @@ export async function fetchWeReadBooksList(
 
     return {
       items,
-      hasMore: false
+      hasMore: false,
+      readingStats
     }
   } catch (err: any) {
     return {
@@ -460,6 +543,7 @@ export async function fetchBooksList(
   items: BookItem[]
   hasMore: boolean
   nextCursor?: string | null
+  readingStats?: WeReadReadingStats
   error?: string
 }> {
   const chosenSource = settings.booksSource

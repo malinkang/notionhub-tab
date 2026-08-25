@@ -10,7 +10,10 @@ import {
   Flame,
   ChevronLeft,
   ChevronRight,
-  X
+  X,
+  Clock,
+  Calendar,
+  Trophy
 } from "lucide-react"
 import {
   fetchBooksList,
@@ -18,7 +21,8 @@ import {
   fetchMoviesList,
   type BookItem,
   type MemoItem,
-  type MovieItem
+  type MovieItem,
+  type WeReadReadingStats
 } from "../lib/gallery"
 import type { DockModuleId, NewTabSettings } from "../lib/settingsStore"
 
@@ -39,6 +43,7 @@ export default function EmbeddedGalleryView({
   const [nextCursor, setNextCursor] = useState<string | null>(null)
   const [movies, setMovies] = useState<MovieItem[]>([])
   const [books, setBooks] = useState<BookItem[]>([])
+  const [readingStats, setReadingStats] = useState<WeReadReadingStats | null>(null)
   const [memos, setMemos] = useState<MemoItem[]>([])
   const [error, setError] = useState<string | null>(null)
   const [selectedStatus, setSelectedStatus] = useState<string>("全部")
@@ -80,6 +85,7 @@ export default function EmbeddedGalleryView({
     setError(null)
     setHasMore(false)
     setNextCursor(null)
+    setReadingStats(null)
     try {
       if (module === "movies") {
         const res = await fetchMoviesList(settings)
@@ -100,6 +106,7 @@ export default function EmbeddedGalleryView({
           setError(res.error)
         } else {
           setBooks(res.items)
+          setReadingStats(res.readingStats || null)
           setHasMore(res.hasMore)
           setNextCursor(res.nextCursor || null)
         }
@@ -237,6 +244,91 @@ export default function EmbeddedGalleryView({
               title="配置数据源">
               <Settings size={13} />
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* 📖 微信读书阅读时长与数据统计看板 */}
+      {module === "books" && !error && readingStats && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 mb-4 select-none animate-in fade-in slide-in-from-top-2 duration-300">
+          {/* 本周阅读 */}
+          <div className="flex items-center gap-2.5 px-3.5 py-2.5 rounded-2xl bg-white/10 dark:bg-black/35 backdrop-blur-xl border border-white/15 shadow-sm">
+            <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-amber-500/20 text-amber-300 flex-shrink-0">
+              <Clock size={16} />
+            </div>
+            <div className="flex flex-col min-w-0">
+              <span className="text-[10px] text-white/60">本周阅读</span>
+              <div className="flex items-baseline gap-1 truncate">
+                <span className="text-xs sm:text-sm font-bold text-white tracking-tight">
+                  {readingStats.weeklyFormatted}
+                </span>
+                {readingStats.weeklyDays > 0 && (
+                  <span className="text-[10px] text-white/50">
+                    ({readingStats.weeklyDays}天)
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* 本月阅读 */}
+          <div className="flex items-center gap-2.5 px-3.5 py-2.5 rounded-2xl bg-white/10 dark:bg-black/35 backdrop-blur-xl border border-white/15 shadow-sm">
+            <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-sky-500/20 text-sky-300 flex-shrink-0">
+              <Calendar size={16} />
+            </div>
+            <div className="flex flex-col min-w-0">
+              <span className="text-[10px] text-white/60">本月阅读</span>
+              <div className="flex items-baseline gap-1 truncate">
+                <span className="text-xs sm:text-sm font-bold text-white tracking-tight">
+                  {readingStats.monthlyFormatted}
+                </span>
+                {readingStats.monthlyDays > 0 && (
+                  <span className="text-[10px] text-white/50">
+                    ({readingStats.monthlyDays}天)
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* 读书排行 */}
+          {readingStats.rankText ? (
+            <div className="flex items-center gap-2.5 px-3.5 py-2.5 rounded-2xl bg-white/10 dark:bg-black/35 backdrop-blur-xl border border-white/15 shadow-sm">
+              <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-300 flex-shrink-0">
+                <Trophy size={16} />
+              </div>
+              <div className="flex flex-col min-w-0">
+                <span className="text-[10px] text-white/60">读书排行</span>
+                <span className="text-xs sm:text-sm font-bold text-white truncate tracking-tight">
+                  {readingStats.rankText}
+                </span>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2.5 px-3.5 py-2.5 rounded-2xl bg-white/10 dark:bg-black/35 backdrop-blur-xl border border-white/15 shadow-sm">
+              <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-300 flex-shrink-0">
+                <Library size={16} />
+              </div>
+              <div className="flex flex-col min-w-0">
+                <span className="text-[10px] text-white/60">书架藏书</span>
+                <span className="text-xs sm:text-sm font-bold text-white tracking-tight">
+                  {books.length} 本
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* 笔记与藏书 */}
+          <div className="flex items-center gap-2.5 px-3.5 py-2.5 rounded-2xl bg-white/10 dark:bg-black/35 backdrop-blur-xl border border-white/15 shadow-sm">
+            <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-purple-500/20 text-purple-300 flex-shrink-0">
+              <BookOpen size={16} />
+            </div>
+            <div className="flex flex-col min-w-0">
+              <span className="text-[10px] text-white/60">笔记与藏书</span>
+              <span className="text-xs sm:text-sm font-bold text-white tracking-tight">
+                {books.length} 本书籍
+              </span>
+            </div>
           </div>
         </div>
       )}
