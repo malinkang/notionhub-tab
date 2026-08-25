@@ -8,7 +8,7 @@ import {
 const NOTION_VERSION = "2022-06-28"
 const NOTION_PAGE_SIZE = 50
 const WEREAD_GATEWAY_URL = "https://i.weread.qq.com/api/agent/gateway"
-const WEREAD_SKILL_VERSION = "1.0.3"
+const WEREAD_SKILL_VERSION = "1.0.4"
 const WEREAD_FALLBACK_COVER = "https://www.notion.so/icons/book_gray.svg"
 
 export interface Highlight {
@@ -249,6 +249,52 @@ export async function fetchNotionPageTitle(
   return ""
 }
 
+export async function fetchNotionPageBlocks(
+  token: string,
+  pageId: string
+): Promise<{ text: string; images: string[] }> {
+  const cleanId = normalizeNotionId(pageId)
+  try {
+    const data = await notionFetch<{ results?: any[] }>(
+      token,
+      `blocks/${cleanId}/children?page_size=50`
+    )
+    const blocks = data.results || []
+    const textParts: string[] = []
+    const images: string[] = []
+
+    for (const block of blocks) {
+      const type = block.type
+      const blockObj = block[type]
+      if (blockObj?.rich_text) {
+        const text = blockObj.rich_text
+          .map((t: any) => t.plain_text || "")
+          .join("")
+        if (text.trim()) {
+          if (type === "bulleted_list_item") {
+            textParts.push(`• ${text}`)
+          } else if (type === "to_do") {
+            textParts.push(blockObj.checked ? `☑ ${text}` : `☐ ${text}`)
+          } else {
+            textParts.push(text)
+          }
+        }
+      } else if (type === "image") {
+        const imgUrl = getFileUrl(blockObj)
+        if (imgUrl) images.push(imgUrl)
+      }
+    }
+
+    return {
+      text: textParts.join("\n\n"),
+      images
+    }
+  } catch (err) {
+    console.warn(`[Notion API] Failed to fetch page blocks for ${cleanId}:`, err)
+    return { text: "", images: [] }
+  }
+}
+
 function getPageCover(page: NotionPage): string {
   return getFileUrl(page.cover) || getFileUrl(page.icon)
 }
@@ -317,25 +363,18 @@ export async function queryNotionSource(
   body: Record<string, unknown> = {}
 ): Promise<NotionQueryResponse> {
   const cleanId = normalizeNotionId(sourceId)
-  try {
-    return await notionFetch<NotionQueryResponse>(
-      token,
-      `databases/${cleanId}/query`,
-      {
-        method: "POST",
-        body: JSON.stringify({ page_size: NOTION_PAGE_SIZE, ...body })
-      }
-    )
-  } catch (error) {
-    return await notionFetch<NotionQueryResponse>(
-      token,
-      `data_sources/${cleanId}/query`,
-      {
-        method: "POST",
-        body: JSON.stringify({ page_size: NOTION_PAGE_SIZE, ...body })
-      }
-    )
+  if (!cleanId) {
+    throw new Error("数据库 ID 无效")
   }
+
+  return await notionFetch<NotionQueryResponse>(
+    token,
+    `databases/${cleanId}/query`,
+    {
+      method: "POST",
+      body: JSON.stringify({ page_size: NOTION_PAGE_SIZE, ...body })
+    }
+  )
 }
 
 export async function fetchNotionProperties(
@@ -527,7 +566,7 @@ async function fetchWeReadGateway<T>(
     upgrade_info?: { message?: string }
   }
   if (data.upgrade_info?.message) {
-    throw new Error(data.upgrade_info.message)
+    console.warn("[WeRead API Upgrade Info]", data.upgrade_info.message)
   }
   if (data.errcode && data.errcode !== 0) {
     throw new Error(data.errmsg || `WeRead API ${data.errcode}`)
@@ -554,10 +593,23 @@ function normalizeWeReadHighlight(item: WeReadBookmark): Highlight | null {
   }
 }
 
-function normalizeWeReadCover(cover?: string): string {
-  const normalized = (cover || "").replace("/s_", "/t7_").trim()
+export function normalizeWeReadCover(
+  cover?: string,
+  fallback = WEREAD_FALLBACK_COVER
+): string {
+  if (!cover || typeof cover !== "string") return fallback
+  let normalized = cover.trim()
   if (!normalized || !normalized.startsWith("http")) {
-    return WEREAD_FALLBACK_COVER
+    return fallback
+  }
+
+  // 微信读书封面高清化 (weread2notion 规则: /s_ /m_ /t6_ -> /t7_)
+  if (normalized.includes("/s_")) {
+    normalized = normalized.replace("/s_", "/t7_")
+  } else if (normalized.includes("/m_")) {
+    normalized = normalized.replace("/m_", "/t7_")
+  } else if (normalized.includes("/t6_")) {
+    normalized = normalized.replace("/t6_", "/t7_")
   }
 
   return normalized

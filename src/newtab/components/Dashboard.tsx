@@ -8,9 +8,12 @@ import {
   newTabStorage,
   SYSTEM_FONT_STACK,
   useNewTabSettings,
-  type BackgroundFrequency
+  type BackgroundFrequency,
+  type DockModuleId
 } from "../lib/settingsStore"
 import Clock from "./Clock"
+import EmbeddedGalleryView from "./EmbeddedGalleryView"
+import FloatingDock from "./FloatingDock"
 import HighlightQuote from "./HighlightQuote"
 import MusicPlayer from "./MusicPlayer"
 import SettingsPanel from "./SettingsPanel"
@@ -362,6 +365,36 @@ export default function Dashboard() {
     videoFallback: null,
     videoPoster: null
   })
+
+  const [activeModule, setActiveModule] = useState<DockModuleId>("home")
+
+  const handleSelectModule = (id: DockModuleId) => {
+    if (id === "music") {
+      setSettings((prev) => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          showMusicPlayer: !(prev.showMusicPlayer ?? false)
+        }
+      })
+      return
+    }
+    setActiveModule(id)
+  }
+
+  const handleToggleTheme = () => {
+    setSettings((prev) => {
+      if (!prev) return prev
+      const isCurrentlyDark =
+        prev.theme === "dark" ||
+        (prev.theme === "system" &&
+          window.matchMedia("(prefers-color-scheme: dark)").matches)
+      return {
+        ...prev,
+        theme: isCurrentlyDark ? "light" : "dark"
+      }
+    })
+  }
 
   const refreshBackground = useCallback(() => {
     setSettings((prev) => {
@@ -911,7 +944,7 @@ export default function Dashboard() {
 
   return (
     <div
-      className="min-h-screen flex flex-col relative transition-colors duration-500 overflow-hidden"
+      className="h-screen w-screen flex flex-col relative transition-colors duration-500 overflow-hidden select-none"
       style={bgStyle}>
       {/* Background Media */}
       {bgVideo && (
@@ -999,19 +1032,38 @@ export default function Dashboard() {
       </div>
 
       <main
-        className="notionhub-newtab-interface flex-1 w-full z-10 relative"
+        className="notionhub-newtab-interface flex-1 w-full min-h-0 z-10 relative overflow-hidden flex flex-col"
         style={interfaceFontStyle}>
-        <div className="absolute top-[35%] left-1/2 -translate-x-1/2 -translate-y-1/2 text-center flex flex-col items-center justify-center w-full">
-          <div className="flex flex-col items-center justify-center w-full overflow-visible">
-            <Clock onClick={refreshBackground} />
+        {activeModule === "home" ? (
+          <div className="absolute top-[35%] left-1/2 -translate-x-1/2 -translate-y-1/2 text-center flex flex-col items-center justify-center w-full animate-in fade-in zoom-in-95 duration-300">
+            <div className="flex flex-col items-center justify-center w-full overflow-visible">
+              <Clock onClick={refreshBackground} />
+            </div>
+            <div className="w-full flex flex-col items-center justify-start mt-32">
+              {settings.showHighlights && <HighlightQuote />}
+            </div>
           </div>
-          <div className="w-full flex flex-col items-center justify-start mt-32">
-            {settings.showHighlights && <HighlightQuote />}
+        ) : (
+          <div className="w-full h-full pt-10 pb-24 px-4 sm:px-8 md:px-14 overflow-y-auto custom-scrollbar">
+            <EmbeddedGalleryView
+              module={activeModule}
+              settings={settings}
+              onOpenSettings={() => setIsSettingsOpen(true)}
+            />
           </div>
-        </div>
+        )}
       </main>
 
       <MusicPlayer />
+
+      {/* 底部悬浮胶囊 Dock 导航栏 */}
+      {settings.showDock && (
+        <FloatingDock
+          activeModule={activeModule}
+          onSelectModule={handleSelectModule}
+          settings={settings}
+        />
+      )}
 
       <SettingsPanel
         isOpen={isSettingsOpen}

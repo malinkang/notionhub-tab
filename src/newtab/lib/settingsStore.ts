@@ -18,8 +18,58 @@ export type BackgroundProvider =
   | "pixabay"
   | "notion"
   | "local"
-export type NotionImageSource = "cover" | "files"
-export type NotesSource = "notion" | "weread"
+export type DockModuleId =
+  | "home"
+  | "memos"
+  | "movies"
+  | "books"
+  | "sports"
+
+export interface DockModuleInfo {
+  id: DockModuleId
+  name: string
+  iconName: string
+  description: string
+  defaultEnabled: boolean
+}
+
+export const DOCK_AVAILABLE_MODULES: DockModuleInfo[] = [
+  {
+    id: "home",
+    name: "首页",
+    iconName: "Home",
+    description: "极简时钟与问候语",
+    defaultEnabled: true
+  },
+  {
+    id: "memos",
+    name: "随笔",
+    iconName: "PenLine",
+    description: "个人动态、灵感碎片与随笔",
+    defaultEnabled: true
+  },
+  {
+    id: "movies",
+    name: "观影",
+    iconName: "Clapperboard",
+    description: "豆瓣/Trakt 影视海报瀑布流",
+    defaultEnabled: true
+  },
+  {
+    id: "books",
+    name: "书架",
+    iconName: "Library",
+    description: "微信读书与豆瓣书架",
+    defaultEnabled: true
+  },
+  {
+    id: "sports",
+    name: "运动",
+    iconName: "Flame",
+    description: "Keep 运动打卡看板",
+    defaultEnabled: true
+  }
+]
 
 export interface NewTabSettings {
   theme: Theme
@@ -45,6 +95,10 @@ export interface NewTabSettings {
   enableMediaCache: boolean
   localFolderName?: string
   localFolderMediaCount?: number
+
+  showDock: boolean
+  enabledDockModules: DockModuleId[]
+  dockCustomLabels?: Record<string, string>
 
   showMusicPlayer: boolean
   musicPlayerBgBlur: number
@@ -84,6 +138,32 @@ export interface NewTabSettings {
   showHighlightBg: boolean
   highlightFont: string
 
+  // 观影画廊设置
+  moviesNotionToken?: string
+  moviesNotionDatabaseId?: string
+  moviesCoverProperty?: string
+  moviesTitleProperty?: string
+  moviesRatingProperty?: string
+  moviesDateProperty?: string
+  moviesReviewProperty?: string
+
+  // 书架画廊设置
+  booksSource?: "notion" | "weread"
+  booksNotionToken?: string
+  booksNotionDatabaseId?: string
+  booksCoverProperty?: string
+  booksTitleProperty?: string
+  booksAuthorProperty?: string
+  booksProgressProperty?: string
+  booksRatingProperty?: string
+
+  // 随笔/唠叨设置
+  memosNotionToken?: string
+  memosNotionDatabaseId?: string
+  memosContentProperty?: string
+  memosDateProperty?: string
+  memosTagProperty?: string
+
   globalFontFamily: string
   globalFontWeight: string
   globalFontSize: number
@@ -114,6 +194,16 @@ export const defaultSettings: NewTabSettings = {
   enableMediaCache: true,
   localFolderName: "",
   localFolderMediaCount: 0,
+
+  showDock: true,
+  enabledDockModules: [
+    "home",
+    "memos",
+    "movies",
+    "books",
+    "sports"
+  ],
+  dockCustomLabels: {},
 
   showMusicPlayer: false,
   musicPlayerBgBlur: 24,
@@ -152,6 +242,29 @@ export const defaultSettings: NewTabSettings = {
   showHighlightCover: true,
   showHighlightBg: true,
   highlightFont: SYSTEM_FONT_STACK,
+
+  moviesNotionToken: "",
+  moviesNotionDatabaseId: "",
+  moviesCoverProperty: "",
+  moviesTitleProperty: "",
+  moviesRatingProperty: "",
+  moviesDateProperty: "",
+  moviesReviewProperty: "",
+
+  booksSource: "weread",
+  booksNotionToken: "",
+  booksNotionDatabaseId: "",
+  booksCoverProperty: "",
+  booksTitleProperty: "",
+  booksAuthorProperty: "",
+  booksProgressProperty: "",
+  booksRatingProperty: "",
+
+  memosNotionToken: "",
+  memosNotionDatabaseId: "",
+  memosContentProperty: "",
+  memosDateProperty: "",
+  memosTagProperty: "",
 
   globalFontFamily: SYSTEM_FONT_STACK,
   globalFontWeight: "300",

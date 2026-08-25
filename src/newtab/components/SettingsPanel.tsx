@@ -6,7 +6,11 @@ import {
   FolderOpen,
   HardDrive,
   RefreshCw,
-  X
+  X,
+  ChevronUp,
+  ChevronDown,
+  RotateCcw,
+  Lock
 } from "lucide-react"
 import React, { useEffect, useState } from "react"
 import toast from "react-hot-toast"
@@ -17,11 +21,13 @@ import { clearMediaCache, getMediaCacheStats } from "../lib/mediaCache"
 import { clearMusicPlayerCache } from "../lib/music"
 import { normalizeNotionId } from "../lib/notion"
 import {
+  DOCK_AVAILABLE_MODULES,
   SYSTEM_FONT_STACK,
   useNewTabSettings,
   type BackgroundFrequency,
   type BackgroundProvider,
   type BackgroundType,
+  type DockModuleId,
   type NewTabSettings,
   type NotesSource,
   type NotionImageSource,
@@ -33,7 +39,13 @@ interface SettingsPanelProps {
   onClose: () => void
 }
 
-type NotionSchemaTarget = "background" | "notes" | "music"
+type NotionSchemaTarget =
+  | "background"
+  | "notes"
+  | "music"
+  | "movies"
+  | "books"
+  | "memos"
 
 const fontOptions = [
   { label: "系统默认", value: SYSTEM_FONT_STACK },
@@ -229,13 +241,25 @@ export default function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
   const [musicProperties, setMusicProperties] = useState<
     NotionPropertySchema[]
   >([])
+  const [moviesProperties, setMoviesProperties] = useState<
+    NotionPropertySchema[]
+  >([])
+  const [booksProperties, setBooksProperties] = useState<
+    NotionPropertySchema[]
+  >([])
+  const [memosProperties, setMemosProperties] = useState<
+    NotionPropertySchema[]
+  >([])
 
   const [schemaErrors, setSchemaErrors] = useState<
     Record<NotionSchemaTarget, string | null>
   >({
     background: null,
     notes: null,
-    music: null
+    music: null,
+    movies: null,
+    books: null,
+    memos: null
   })
 
   const [mediaStats, setMediaStats] = useState<{
@@ -344,7 +368,10 @@ export default function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
     key:
       | "backgroundNotionDatabaseId"
       | "notesNotionDatabaseId"
-      | "musicNotionDatabaseId",
+      | "musicNotionDatabaseId"
+      | "moviesNotionDatabaseId"
+      | "booksNotionDatabaseId"
+      | "memosNotionDatabaseId",
     rawVal: string
   ) => {
     const clean = rawVal.trim()
@@ -368,16 +395,28 @@ export default function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
         ? settings.backgroundNotionToken
         : target === "notes"
           ? settings.notesNotionToken
-          : settings.musicNotionToken
+          : target === "music"
+            ? settings.musicNotionToken
+            : target === "movies"
+              ? settings.moviesNotionToken || settings.backgroundNotionToken
+              : target === "books"
+                ? settings.booksNotionToken || settings.backgroundNotionToken
+                : settings.memosNotionToken || settings.backgroundNotionToken
     const rawDatabaseId =
       target === "background"
         ? settings.backgroundNotionDatabaseId
         : target === "notes"
           ? settings.notesNotionDatabaseId
-          : settings.musicNotionDatabaseId
+          : target === "music"
+            ? settings.musicNotionDatabaseId
+            : target === "movies"
+              ? settings.moviesNotionDatabaseId || ""
+              : target === "books"
+                ? settings.booksNotionDatabaseId || ""
+                : settings.memosNotionDatabaseId || ""
 
     return {
-      token: token.trim(),
+      token: (token || "").trim(),
       databaseId: normalizeNotionId(rawDatabaseId)
     }
   }
@@ -386,6 +425,9 @@ export default function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
     if (target === "background") setBackgroundProperties([])
     if (target === "notes") setNotesProperties([])
     if (target === "music") setMusicProperties([])
+    if (target === "movies") setMoviesProperties([])
+    if (target === "books") setBooksProperties([])
+    if (target === "memos") setMemosProperties([])
   }
 
   const loadSchema = async (target: NotionSchemaTarget, showToast = false) => {
@@ -440,6 +482,113 @@ export default function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
         }
         if (audioProp && !settings.musicAudioProperty) {
           updateSetting("musicAudioProperty", audioProp.name)
+        }
+      }
+      if (target === "movies") {
+        setMoviesProperties(properties)
+        const titleProp =
+          properties.find((p) => p.type === "title") ||
+          properties.find(
+            (p) => p.name.includes("电影") || p.name.includes("名")
+          )
+        const ratingProp = properties.find(
+          (p) =>
+            p.name.includes("评分") ||
+            p.name.includes("分") ||
+            p.name.toLowerCase().includes("rating") ||
+            p.name.toLowerCase().includes("score")
+        )
+        const dateProp = properties.find(
+          (p) =>
+            p.name.includes("上映") ||
+            p.name.includes("观影") ||
+            p.name.includes("日期") ||
+            p.name.includes("时间") ||
+            p.type === "date"
+        )
+        const reviewProp = properties.find(
+          (p) =>
+            p.name.includes("短评") ||
+            p.name.includes("影评") ||
+            p.name.includes("评价") ||
+            p.name.includes("剧情")
+        )
+        if (titleProp && !settings.moviesTitleProperty) {
+          updateSetting("moviesTitleProperty", titleProp.name)
+        }
+        if (ratingProp && !settings.moviesRatingProperty) {
+          updateSetting("moviesRatingProperty", ratingProp.name)
+        }
+        if (dateProp && !settings.moviesDateProperty) {
+          updateSetting("moviesDateProperty", dateProp.name)
+        }
+        if (reviewProp && !settings.moviesReviewProperty) {
+          updateSetting("moviesReviewProperty", reviewProp.name)
+        }
+      }
+      if (target === "books") {
+        setBooksProperties(properties)
+        const titleProp =
+          properties.find((p) => p.type === "title") ||
+          properties.find(
+            (p) => p.name.includes("书") || p.name.includes("名")
+          )
+        const authorProp = properties.find(
+          (p) =>
+            p.name.includes("作") || p.name.toLowerCase().includes("author")
+        )
+        const progressProp = properties.find(
+          (p) =>
+            p.name.includes("进度") ||
+            p.name.toLowerCase().includes("progress")
+        )
+        const ratingProp = properties.find(
+          (p) =>
+            p.name.includes("评分") ||
+            p.name.includes("分") ||
+            p.name.toLowerCase().includes("rating")
+        )
+        if (titleProp && !settings.booksTitleProperty) {
+          updateSetting("booksTitleProperty", titleProp.name)
+        }
+        if (authorProp && !settings.booksAuthorProperty) {
+          updateSetting("booksAuthorProperty", authorProp.name)
+        }
+        if (progressProp && !settings.booksProgressProperty) {
+          updateSetting("booksProgressProperty", progressProp.name)
+        }
+        if (ratingProp && !settings.booksRatingProperty) {
+          updateSetting("booksRatingProperty", ratingProp.name)
+        }
+      }
+      if (target === "memos") {
+        setMemosProperties(properties)
+        const contentProp =
+          properties.find((p) => p.type === "title") ||
+          properties.find((p) => p.type === "rich_text") ||
+          properties.find((p) => p.name.includes("内容"))
+        const dateProp = properties.find(
+          (p) =>
+            p.type === "date" ||
+            p.type === "created_time" ||
+            p.name.includes("日期") ||
+            p.name.includes("时间")
+        )
+        const tagProp = properties.find(
+          (p) =>
+            p.name.includes("标签") ||
+            p.name.includes("tag") ||
+            p.type === "multi_select" ||
+            p.type === "select"
+        )
+        if (contentProp && !settings.memosContentProperty) {
+          updateSetting("memosContentProperty", contentProp.name)
+        }
+        if (dateProp && !settings.memosDateProperty) {
+          updateSetting("memosDateProperty", dateProp.name)
+        }
+        if (tagProp && !settings.memosTagProperty) {
+          updateSetting("memosTagProperty", tagProp.name)
         }
       }
       if (showToast) {
@@ -1388,6 +1537,466 @@ export default function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
                         ? "已清理"
                         : "清理缓存"}
                   </button>
+                </Row>
+              </>
+            )}
+          </Card>
+
+          <SectionTitle>底部导航栏</SectionTitle>
+          <Card>
+            <Row label="显示底部 Dock">
+              <input
+                type="checkbox"
+                className="bonjourr-switch"
+                checked={settings.showDock ?? true}
+                onChange={(e) => updateSetting("showDock", e.target.checked)}
+              />
+            </Row>
+            {(settings.showDock ?? true) && (
+              <div className="p-4 space-y-3 bg-base-200/20">
+                <div className="flex items-center justify-between px-1">
+                  <span className="text-xs font-semibold text-base-content/70">
+                    模块显示与顺序排列（首页固定在第一位）：
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      updateSetting("enabledDockModules", [
+                        "home",
+                        "memos",
+                        "movies",
+                        "books",
+                        "sports"
+                      ])
+                      toast.success("已恢复默认顺序")
+                    }}
+                    className="flex items-center gap-1 text-[11px] text-base-content/60 hover:text-primary transition-colors cursor-pointer"
+                    title="恢复默认排序">
+                    <RotateCcw size={12} />
+                    恢复默认
+                  </button>
+                </div>
+
+                {(() => {
+                  const enabledList = settings.enabledDockModules || [
+                    "home",
+                    "memos",
+                    "movies",
+                    "books",
+                    "sports"
+                  ]
+                  const allAvailableIds = DOCK_AVAILABLE_MODULES.map((m) => m.id)
+                  const validOrdered = enabledList.filter((id) =>
+                    allAvailableIds.includes(id)
+                  )
+                  const missing = allAvailableIds.filter(
+                    (id) => !validOrdered.includes(id)
+                  )
+                  const withoutHome = [...validOrdered, ...missing].filter(
+                    (id) => id !== "home"
+                  )
+                  const orderedIds: DockModuleId[] = ["home", ...withoutHome]
+
+                  const handleMove = (index: number, direction: "up" | "down") => {
+                    if (index <= 1 && direction === "up") return
+                    if (index >= orderedIds.length - 1 && direction === "down") return
+
+                    const targetIndex = direction === "up" ? index - 1 : index + 1
+                    if (targetIndex < 1) return
+
+                    const nextOrdered = [...orderedIds]
+                    const temp = nextOrdered[index]
+                    nextOrdered[index] = nextOrdered[targetIndex]
+                    nextOrdered[targetIndex] = temp
+
+                    const nextEnabled = nextOrdered.filter((id) =>
+                      enabledList.includes(id)
+                    )
+                    updateSetting("enabledDockModules", nextEnabled)
+                  }
+
+                  const handleToggle = (modId: DockModuleId, checked: boolean) => {
+                    if (modId === "home") return
+                    let next: DockModuleId[]
+                    if (checked) {
+                      const tempSet = new Set([...enabledList, modId])
+                      next = orderedIds.filter((id) => tempSet.has(id))
+                    } else {
+                      next = enabledList.filter((id) => id !== modId)
+                    }
+                    updateSetting("enabledDockModules", next)
+                  }
+
+                  return (
+                    <div className="space-y-2">
+                      {orderedIds.map((modId, index) => {
+                        const mod = DOCK_AVAILABLE_MODULES.find(
+                          (m) => m.id === modId
+                        )
+                        if (!mod) return null
+                        const isHome = modId === "home"
+                        const isChecked = isHome || enabledList.includes(modId)
+                        const isFirstMovable = index === 1
+                        const isLastMovable = index === orderedIds.length - 1
+
+                        return (
+                          <div
+                            key={modId}
+                            className={`flex items-center justify-between gap-3 p-2.5 rounded-xl border transition-all ${
+                              isChecked
+                                ? "bg-base-100 border-primary/30 shadow-xs"
+                                : "bg-base-200/40 border-base-content/5 opacity-60"
+                            }`}>
+                            {/* 左侧勾选与信息 */}
+                            <label className="flex items-center gap-3 min-w-0 flex-1 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                className="checkbox checkbox-xs checkbox-primary"
+                                checked={isChecked}
+                                disabled={isHome}
+                                onChange={(e) =>
+                                  handleToggle(modId, e.target.checked)
+                                }
+                              />
+                              <div className="flex flex-col min-w-0">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-xs font-semibold text-base-content truncate">
+                                    {settings.dockCustomLabels?.[modId] || mod.name}
+                                  </span>
+                                  {isHome && (
+                                    <span className="flex items-center gap-0.5 text-[10px] text-primary/80 bg-primary/10 px-1.5 py-0.2 rounded">
+                                      <Lock size={10} />
+                                      固定首位
+                                    </span>
+                                  )}
+                                </div>
+                                <span className="text-[10px] text-base-content/50 truncate">
+                                  {mod.description}
+                                </span>
+                              </div>
+                            </label>
+
+                            {/* 右侧排序上下移动按钮 */}
+                            {!isHome && (
+                              <div className="flex items-center gap-1 flex-shrink-0">
+                                <button
+                                  type="button"
+                                  disabled={isFirstMovable}
+                                  onClick={() => handleMove(index, "up")}
+                                  className="btn btn-ghost btn-xs h-7 w-7 min-h-7 p-0 rounded-lg text-base-content/70 hover:text-base-content hover:bg-base-200 disabled:opacity-20 cursor-pointer"
+                                  title="向前移动">
+                                  <ChevronUp size={15} />
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={isLastMovable}
+                                  onClick={() => handleMove(index, "down")}
+                                  className="btn btn-ghost btn-xs h-7 w-7 min-h-7 p-0 rounded-lg text-base-content/70 hover:text-base-content hover:bg-base-200 disabled:opacity-20 cursor-pointer"
+                                  title="向后移动">
+                                  <ChevronDown size={15} />
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )
+                })()}
+              </div>
+            )}
+          </Card>
+
+          <SectionTitle>观影画廊 (Notion)</SectionTitle>
+          <Card>
+            <Row label="Notion Token">
+              <SecretInput
+                value={settings.moviesNotionToken || ""}
+                placeholder="默认复用背景 Token"
+                onChange={(value) => updateSetting("moviesNotionToken", value)}
+              />
+            </Row>
+            <Row label="数据库 ID">
+              <div className="flex items-center gap-2">
+                <TextInput
+                  value={settings.moviesNotionDatabaseId || ""}
+                  placeholder="Database ID 或 Notion 链接"
+                  onChange={(value) =>
+                    handleDatabaseIdChange("moviesNotionDatabaseId", value)
+                  }
+                />
+                <button
+                  type="button"
+                  className="btn btn-circle btn-xs btn-ghost h-8 min-h-8 w-8 p-0 text-base-content/60 hover:text-base-content flex-shrink-0"
+                  title="读取/刷新属性结构"
+                  disabled={loadingSchema === "movies"}
+                  onClick={() => void loadSchema("movies", true)}>
+                  <RefreshCw
+                    size={14}
+                    className={loadingSchema === "movies" ? "animate-spin" : ""}
+                  />
+                </button>
+              </div>
+            </Row>
+            {moviesProperties.length > 0 && (
+              <>
+                <Row label="封面">
+                  <PropertySelect
+                    allowPageCover
+                    value={settings.moviesCoverProperty || "__page_cover__"}
+                    properties={moviesProperties}
+                    filterTypes={["files", "url"]}
+                    onChange={(value) =>
+                      updateSetting("moviesCoverProperty", value)
+                    }
+                  />
+                </Row>
+                <Row label="标题">
+                  <PropertySelect
+                    value={settings.moviesTitleProperty || ""}
+                    properties={moviesProperties}
+                    filterTypes={["title", "rich_text"]}
+                    onChange={(value) =>
+                      updateSetting("moviesTitleProperty", value)
+                    }
+                  />
+                </Row>
+                <Row label="评分">
+                  <PropertySelect
+                    optional
+                    value={settings.moviesRatingProperty || ""}
+                    properties={moviesProperties}
+                    filterTypes={["number", "select", "formula", "rich_text"]}
+                    onChange={(value) =>
+                      updateSetting("moviesRatingProperty", value)
+                    }
+                  />
+                </Row>
+                <Row label="观影日期">
+                  <PropertySelect
+                    optional
+                    value={settings.moviesDateProperty || ""}
+                    properties={moviesProperties}
+                    filterTypes={["date", "created_time", "formula"]}
+                    onChange={(value) =>
+                      updateSetting("moviesDateProperty", value)
+                    }
+                  />
+                </Row>
+                <Row label="短评">
+                  <PropertySelect
+                    optional
+                    value={settings.moviesReviewProperty || ""}
+                    properties={moviesProperties}
+                    filterTypes={["rich_text", "title"]}
+                    onChange={(value) =>
+                      updateSetting("moviesReviewProperty", value)
+                    }
+                  />
+                </Row>
+              </>
+            )}
+          </Card>
+
+          <SectionTitle>书架画廊</SectionTitle>
+          <Card>
+            <Row label="数据来源">
+              <SelectBox
+                value={settings.booksSource || "weread"}
+                onChange={(value) =>
+                  updateSetting("booksSource", value as "notion" | "weread")
+                }>
+                <option value="weread">微信读书</option>
+                <option value="notion">Notion 数据库</option>
+              </SelectBox>
+            </Row>
+
+            {(settings.booksSource || "weread") === "weread" ? (
+              <>
+                <Row label="微信读书 Key">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <SecretInput
+                      value={settings.wereadApiKey || ""}
+                      placeholder="wrk-..."
+                      onChange={(value) => updateSetting("wereadApiKey", value)}
+                    />
+                    <a
+                      href="https://weread.qq.com"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="btn btn-xs btn-ghost text-primary flex-shrink-0"
+                      title="打开微信读书网页版获取 Key">
+                      获取 Key
+                    </a>
+                  </div>
+                </Row>
+                <div className="px-4 py-2 text-xs text-base-content/60 bg-base-200/30">
+                  💡 微信读书 Key 已与首页时钟金句划线配置<strong>全局通用同步</strong>，无需重复填写。
+                </div>
+              </>
+            ) : (
+              <>
+                <Row label="Notion Token">
+                  <SecretInput
+                    value={settings.booksNotionToken || ""}
+                    placeholder="默认复用背景 Token"
+                    onChange={(value) => updateSetting("booksNotionToken", value)}
+                  />
+                </Row>
+                <Row label="数据库 ID">
+                  <div className="flex items-center gap-2">
+                    <TextInput
+                      value={settings.booksNotionDatabaseId || ""}
+                      placeholder="Database ID 或 Notion 链接"
+                      onChange={(value) =>
+                        handleDatabaseIdChange("booksNotionDatabaseId", value)
+                      }
+                    />
+                    <button
+                      type="button"
+                      className="btn btn-circle btn-xs btn-ghost h-8 min-h-8 w-8 p-0 text-base-content/60 hover:text-base-content flex-shrink-0"
+                      title="读取/刷新属性结构"
+                      disabled={loadingSchema === "books"}
+                      onClick={() => void loadSchema("books", true)}>
+                      <RefreshCw
+                        size={14}
+                        className={loadingSchema === "books" ? "animate-spin" : ""}
+                      />
+                    </button>
+                  </div>
+                </Row>
+                {booksProperties.length > 0 && (
+                  <>
+                    <Row label="封面">
+                      <PropertySelect
+                        allowPageCover
+                        value={settings.booksCoverProperty || "__page_cover__"}
+                        properties={booksProperties}
+                        filterTypes={["files", "url"]}
+                        onChange={(value) =>
+                          updateSetting("booksCoverProperty", value)
+                        }
+                      />
+                    </Row>
+                    <Row label="书名">
+                      <PropertySelect
+                        value={settings.booksTitleProperty || ""}
+                        properties={booksProperties}
+                        filterTypes={["title", "rich_text"]}
+                        onChange={(value) =>
+                          updateSetting("booksTitleProperty", value)
+                        }
+                      />
+                    </Row>
+                    <Row label="作者">
+                      <PropertySelect
+                        optional
+                        value={settings.booksAuthorProperty || ""}
+                        properties={booksProperties}
+                        filterTypes={[
+                          "rich_text",
+                          "title",
+                          "select",
+                          "people",
+                          "relation"
+                        ]}
+                        onChange={(value) =>
+                          updateSetting("booksAuthorProperty", value)
+                        }
+                      />
+                    </Row>
+                    <Row label="阅读进度">
+                      <PropertySelect
+                        optional
+                        value={settings.booksProgressProperty || ""}
+                        properties={booksProperties}
+                        filterTypes={["number", "select", "formula", "rich_text"]}
+                        onChange={(value) =>
+                          updateSetting("booksProgressProperty", value)
+                        }
+                      />
+                    </Row>
+                    <Row label="评分">
+                      <PropertySelect
+                        optional
+                        value={settings.booksRatingProperty || ""}
+                        properties={booksProperties}
+                        filterTypes={["number", "select", "formula", "rich_text"]}
+                        onChange={(value) =>
+                          updateSetting("booksRatingProperty", value)
+                        }
+                      />
+                    </Row>
+                  </>
+                )}
+              </>
+            )}
+          </Card>
+
+          <SectionTitle>随笔设置 (Notion)</SectionTitle>
+          <Card>
+            <Row label="Notion Token">
+              <SecretInput
+                value={settings.memosNotionToken || ""}
+                placeholder="默认复用背景 Token"
+                onChange={(value) => updateSetting("memosNotionToken", value)}
+              />
+            </Row>
+            <Row label="数据库 ID">
+              <div className="flex items-center gap-2">
+                <TextInput
+                  value={settings.memosNotionDatabaseId || ""}
+                  placeholder="Database ID 或 Notion 链接"
+                  onChange={(value) =>
+                    handleDatabaseIdChange("memosNotionDatabaseId", value)
+                  }
+                />
+                <button
+                  type="button"
+                  className="btn btn-circle btn-xs btn-ghost h-8 min-h-8 w-8 p-0 text-base-content/60 hover:text-base-content flex-shrink-0"
+                  title="读取/刷新属性结构"
+                  disabled={loadingSchema === "memos"}
+                  onClick={() => void loadSchema("memos", true)}>
+                  <RefreshCw
+                    size={14}
+                    className={loadingSchema === "memos" ? "animate-spin" : ""}
+                  />
+                </button>
+              </div>
+            </Row>
+            {memosProperties.length > 0 && (
+              <>
+                <Row label="内容">
+                  <PropertySelect
+                    value={settings.memosContentProperty || ""}
+                    properties={memosProperties}
+                    filterTypes={["title", "rich_text"]}
+                    onChange={(value) =>
+                      updateSetting("memosContentProperty", value)
+                    }
+                  />
+                </Row>
+                <Row label="日期">
+                  <PropertySelect
+                    optional
+                    value={settings.memosDateProperty || ""}
+                    properties={memosProperties}
+                    filterTypes={["date", "created_time", "formula"]}
+                    onChange={(value) =>
+                      updateSetting("memosDateProperty", value)
+                    }
+                  />
+                </Row>
+                <Row label="标签">
+                  <PropertySelect
+                    optional
+                    value={settings.memosTagProperty || ""}
+                    properties={memosProperties}
+                    filterTypes={["select", "multi_select", "rich_text"]}
+                    onChange={(value) =>
+                      updateSetting("memosTagProperty", value)
+                    }
+                  />
                 </Row>
               </>
             )}

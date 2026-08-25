@@ -97,12 +97,11 @@ async function loadAPlayer(): Promise<APlayerConstructor> {
 
 function isMusicConfigured(settings?: any): boolean {
   if (!settings || !settings.showMusicPlayer) return false
-  return Boolean(
-    settings.musicNotionToken?.trim() &&
-    settings.musicNotionDatabaseId?.trim() &&
-    settings.musicTitleProperty?.trim() &&
-    settings.musicAudioProperty?.trim()
-  )
+  const token =
+    settings.musicNotionToken?.trim() ||
+    settings.backgroundNotionToken?.trim() ||
+    settings.notesNotionToken?.trim()
+  return Boolean(token && settings.musicNotionDatabaseId?.trim())
 }
 
 export default function MusicPlayer() {
