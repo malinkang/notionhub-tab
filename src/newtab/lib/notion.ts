@@ -1,4 +1,4 @@
-export const NOTION_VERSION = "2025-09-03"
+export const NOTION_VERSION = "2022-06-28"
 
 export type NotionTextFragment = {
   plain_text?: string
@@ -59,13 +59,35 @@ export type PropertyOption = {
   type: string
 }
 
-export function normalizeNotionId(value: string) {
-  return value
-    .trim()
-    .replace(/^https?:\/\/www\.notion\.so\//, "")
-    .split("?")[0]
-    .split("#")[0]
-    .replace(/-/g, "")
+export function normalizeNotionId(value?: string | null): string {
+  if (!value) return ""
+  const clean = value.trim()
+  if (!clean) return ""
+
+  // 1. 去除 URL Query 和 Hash 参数（防止误提取 ?v= 视图 ID）
+  const withoutQuery = clean.split("?")[0].split("#")[0]
+
+  // 2. 匹配标准 36 位带连字符 UUID (8-4-4-4-12)
+  const uuidMatch = withoutQuery.match(
+    /[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}/
+  )
+  if (uuidMatch) {
+    return uuidMatch[0].replace(/-/g, "").toLowerCase()
+  }
+
+  // 3. 匹配 32 位无连字符 Hex ID
+  const hexMatch = withoutQuery.match(/[a-fA-F0-9]{32}/)
+  if (hexMatch) {
+    return hexMatch[0].toLowerCase()
+  }
+
+  // 4. 兜底策略：如果包含其他字符，提取最后的 32 位 Hex
+  const stripped = withoutQuery.replace(/[^a-fA-F0-9]/g, "")
+  if (stripped.length >= 32) {
+    return stripped.slice(-32).toLowerCase()
+  }
+
+  return withoutQuery.replace(/-/g, "").toLowerCase()
 }
 
 export function getFileUrl(file?: NotionFileReference | null): string {

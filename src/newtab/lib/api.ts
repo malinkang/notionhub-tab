@@ -1,10 +1,11 @@
+import { normalizeNotionId } from "./notion"
 import {
   defaultSettings,
   newTabStorage,
   type NewTabSettings
 } from "./settingsStore"
 
-const NOTION_VERSION = "2025-09-03"
+const NOTION_VERSION = "2022-06-28"
 const NOTION_PAGE_SIZE = 50
 const WEREAD_GATEWAY_URL = "https://i.weread.qq.com/api/agent/gateway"
 const WEREAD_SKILL_VERSION = "1.0.3"
@@ -57,6 +58,17 @@ type NotionProperty = {
   number?: number | null
   select?: NotionSelectValue | null
   multi_select?: NotionSelectValue[]
+  status?: NotionSelectValue | null
+  people?: Array<{ id?: string; name?: string }>
+  relation?: Array<{ id?: string }>
+  rollup?: {
+    type?: string
+    number?: number | null
+    date?: { start?: string | null } | null
+    array?: NotionProperty[]
+  }
+  email?: string | null
+  phone_number?: string | null
   formula?: {
     type?: string
     string?: string | null
@@ -149,15 +161,38 @@ export function getNotionPropertyText(property?: NotionProperty): string {
   const richText = getPlainText(property.rich_text)
   if (richText) return richText
   if (property.select?.name) return property.select.name
+  if (property.status?.name) return property.status.name
   if (property.multi_select?.length) {
     return property.multi_select
       .map((item) => item.name)
       .filter(Boolean)
       .join("、")
   }
+  if (property.people?.length) {
+    return property.people
+      .map((item) => item.name)
+      .filter(Boolean)
+      .join("、")
+  }
+  if (property.rollup) {
+    if (property.rollup.array?.length) {
+      const texts = property.rollup.array
+        .map((p) => getNotionPropertyText(p))
+        .filter(Boolean)
+      if (texts.length) return texts.join("、")
+    }
+    if (typeof property.rollup.number === "number") {
+      return String(property.rollup.number)
+    }
+    if (property.rollup.date?.start) {
+      return property.rollup.date.start
+    }
+  }
   if (property.date?.start) return property.date.start
   if (typeof property.number === "number") return String(property.number)
   if (property.url) return property.url
+  if (property.email) return property.email
+  if (property.phone_number) return property.phone_number
   if (property.formula?.type === "string") return property.formula.string ?? ""
   if (typeof property.formula?.number === "number") {
     return String(property.formula.number)
@@ -176,7 +211,9 @@ export function getNotionPropertyFileUrl(property?: NotionProperty): string {
   return /^https?:\/\//i.test(text) ? text : ""
 }
 
-function getFirstTitle(properties: Record<string, NotionProperty>): string {
+export function getFirstTitle(
+  properties: Record<string, NotionProperty>
+): string {
   for (const property of Object.values(properties)) {
     if (property.type === "title") {
       const text = getNotionPropertyText(property)
@@ -187,8 +224,44 @@ function getFirstTitle(properties: Record<string, NotionProperty>): string {
   return ""
 }
 
+const pageTitleCache = new Map<string, string>()
+
+export async function fetchNotionPageTitle(
+  token: string,
+  pageId: string
+): Promise<string> {
+  const cleanId = normalizeNotionId(pageId)
+  if (pageTitleCache.has(cleanId)) {
+    return pageTitleCache.get(cleanId) || ""
+  }
+
+  try {
+    const page = await notionFetch<NotionPage>(token, `pages/${cleanId}`)
+    const title = getFirstTitle(page.properties || {})
+    if (title) {
+      pageTitleCache.set(cleanId, title)
+      return title
+    }
+  } catch (err) {
+    console.warn("[Notion API] Failed to fetch relation page title:", err)
+  }
+
+  return ""
+}
+
 function getPageCover(page: NotionPage): string {
   return getFileUrl(page.cover) || getFileUrl(page.icon)
+}
+
+export class NotionApiError extends Error {
+  status: number
+  code?: string
+  constructor(message: string, status: number, code?: string) {
+    super(message)
+    this.name = "NotionApiError"
+    this.status = status
+    this.code = code
+  }
 }
 
 async function notionFetch<T>(
@@ -207,7 +280,32 @@ async function notionFetch<T>(
   })
 
   if (!response.ok) {
-    throw new Error(`Notion API ${response.status}`)
+    let errorDetail = `Notion API ${response.status}`
+    let code: string | undefined
+    try {
+      const errJson = await response.json()
+      if (errJson?.message) {
+        errorDetail = errJson.message
+      }
+      if (errJson?.code) {
+        code = errJson.code
+      }
+    } catch {}
+
+    let userFriendlyMsg = errorDetail
+    if (response.status === 401 || code === "unauthorized") {
+      userFriendlyMsg = "Notion Token 无效，请检查 Token 是否正确"
+    } else if (response.status === 404 || code === "object_not_found") {
+      userFriendlyMsg =
+        "未找到数据库，请确认数据库 ID 正确，且已在 Notion 页面右上角 Connect 连接当前集成"
+    } else if (response.status === 403 || code === "restricted_resource") {
+      userFriendlyMsg =
+        "无权访问该数据库，请在 Notion 中为该集成添加页面访问权限"
+    } else if (response.status === 400 && errorDetail.includes("path failed validation")) {
+      userFriendlyMsg = "数据库 ID 格式不正确，请输入 32 位 ID 或完整的 Notion 页面链接"
+    }
+
+    throw new NotionApiError(userFriendlyMsg, response.status, code)
   }
 
   return (await response.json()) as T
@@ -218,10 +316,11 @@ export async function queryNotionSource(
   sourceId: string,
   body: Record<string, unknown> = {}
 ): Promise<NotionQueryResponse> {
+  const cleanId = normalizeNotionId(sourceId)
   try {
     return await notionFetch<NotionQueryResponse>(
       token,
-      `data_sources/${sourceId}/query`,
+      `databases/${cleanId}/query`,
       {
         method: "POST",
         body: JSON.stringify({ page_size: NOTION_PAGE_SIZE, ...body })
@@ -230,7 +329,7 @@ export async function queryNotionSource(
   } catch (error) {
     return await notionFetch<NotionQueryResponse>(
       token,
-      `databases/${sourceId}/query`,
+      `data_sources/${cleanId}/query`,
       {
         method: "POST",
         body: JSON.stringify({ page_size: NOTION_PAGE_SIZE, ...body })
@@ -243,39 +342,86 @@ export async function fetchNotionProperties(
   token: string,
   sourceId: string
 ): Promise<NotionPropertySchema[]> {
-  let metadata: { properties?: Record<string, { type?: string }> }
-
-  try {
-    metadata = await notionFetch(token, `data_sources/${sourceId}`)
-  } catch {
-    metadata = await notionFetch(token, `databases/${sourceId}`)
+  const cleanId = normalizeNotionId(sourceId)
+  if (!cleanId) {
+    throw new Error("数据库 ID 不能为空")
   }
 
-  return Object.entries(metadata.properties || {}).map(([name, property]) => ({
-    name,
-    type: property.type || "unknown"
-  }))
+  let metadata: {
+    properties?: Record<string, { type?: string }>
+    data_sources?: Array<{ id: string }>
+  } | undefined
+
+  try {
+    metadata = await notionFetch(token, `databases/${cleanId}`)
+    // 如果返回了 data_sources 且没有 properties，自动穿透获取 data_sources 属性
+    if (
+      metadata?.data_sources?.length &&
+      (!metadata.properties || !Object.keys(metadata.properties).length)
+    ) {
+      try {
+        metadata = await notionFetch(
+          token,
+          `data_sources/${metadata.data_sources[0].id}`
+        )
+      } catch {}
+    }
+  } catch (err) {
+    try {
+      metadata = await notionFetch(token, `data_sources/${cleanId}`)
+    } catch {
+      throw err
+    }
+  }
+
+  const props = Object.entries(metadata?.properties || {}).map(
+    ([name, property]) => ({
+      name,
+      type: property.type || "unknown"
+    })
+  )
+
+  if (!props.length) {
+    throw new Error("未读取到任何数据库属性，请确认该页面是 Database 数据库")
+  }
+
+  return props
 }
 
 export async function getNotionBackgroundImage(
   token: string,
   sourceId: string,
   source: "cover" | "files",
-  filesProperty?: string
+  filesProperty?: string,
+  seed?: string
 ): Promise<string | null> {
-  const data = await queryNotionSource(token, sourceId, { page_size: 20 })
+  const data = await queryNotionSource(token, sourceId, { page_size: 50 })
+  const candidates: string[] = []
 
   for (const page of data.results || []) {
     if (source === "cover") {
       const cover = getPageCover(page)
-      if (cover) return cover
+      if (cover) candidates.push(cover)
+    } else {
+      const url = getNotionPropertyFileUrl(
+        page.properties?.[filesProperty || ""]
+      )
+      if (url) candidates.push(url)
     }
-
-    const url = getNotionPropertyFileUrl(page.properties?.[filesProperty || ""])
-    if (url) return url
   }
 
-  return null
+  if (!candidates.length) return null
+  if (!seed) {
+    return candidates[Math.floor(Math.random() * candidates.length)]
+  }
+
+  let hash = 0
+  for (let i = 0; i < seed.length; i++) {
+    hash = (hash << 5) - hash + seed.charCodeAt(i)
+    hash |= 0
+  }
+  const index = Math.abs(hash) % candidates.length
+  return candidates[index]
 }
 
 function mapNotionHighlight(
@@ -296,8 +442,11 @@ function mapNotionHighlight(
     getNotionPropertyText(properties[settings.notesSourceProperty || ""]) ||
     title
   const cover =
-    getNotionPropertyFileUrl(properties[settings.notesCoverProperty || ""]) ||
-    getPageCover(page)
+    settings.notesCoverProperty === "__page_cover__"
+      ? getPageCover(page)
+      : getNotionPropertyFileUrl(
+          properties[settings.notesCoverProperty || ""]
+        ) || getPageCover(page)
 
   return {
     text: content,

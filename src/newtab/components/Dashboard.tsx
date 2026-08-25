@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useRef, useState } from "react"
 
 import { getNotionBackgroundImage } from "../lib/api"
 import appleVideos from "../lib/appleVideos.json"
+import { getRandomLocalMedia } from "../lib/localFolder"
+import { fetchAndCacheMedia, getMediaBlobUrl } from "../lib/mediaCache"
 import {
   newTabStorage,
   SYSTEM_FONT_STACK,
@@ -70,6 +72,54 @@ function logBackgroundDecision(
   if (!ENABLE_BACKGROUND_DEBUG) return
   const payload = details ? JSON.stringify(details, null, 2) : "{}"
   console.info(`[NotionHub NewTab Background] ${message}\n${payload}`)
+}
+
+function getEffectiveBackgroundProvider(
+  settings?: NewTabSettings | null
+): BackgroundProvider {
+  if (!settings) return "bing"
+
+  const candidate = settings.backgroundProvider
+
+  if (candidate === "local") {
+    return "local"
+  }
+
+  if (candidate === "notion") {
+    if (
+      settings.backgroundNotionToken?.trim() &&
+      settings.backgroundNotionDatabaseId?.trim()
+    ) {
+      return "notion"
+    }
+    return settings.backgroundType === "video" ? "apple" : "bing"
+  }
+
+  if (settings.backgroundType === "video") {
+    if (
+      settings.backgroundProvider === "pixabay" &&
+      settings.pixabayApiKey?.trim()
+    ) {
+      return "pixabay"
+    }
+    return "apple"
+  }
+
+  if (candidate === "unsplash") {
+    if (settings.unsplashAccessKey?.trim()) {
+      return "unsplash"
+    }
+    return "bing"
+  }
+
+  if (candidate === "pixabay") {
+    if (settings.pixabayApiKey?.trim()) {
+      return "pixabay"
+    }
+    return "bing"
+  }
+
+  return "bing"
 }
 
 function normalizeBackgroundFrequency(frequency?: string): BackgroundFrequency {
@@ -217,9 +267,15 @@ function preloadVideo(url: string | null) {
 
 function needsBackgroundChange(
   frequency: BackgroundFrequency,
-  lastChangedAt?: number
+  lastChangedAt?: number,
+  isNotionProvider = false
 ) {
   if (!lastChangedAt) return true
+
+  // Notion 官方托管的 S3 链接默认 60 分钟过期，满 50 分钟强制换取新签名链接避免 403
+  if (isNotionProvider && Date.now() - lastChangedAt > 50 * 60 * 1000) {
+    return true
+  }
 
   const now = new Date()
   const last = new Date(lastChangedAt)
@@ -383,16 +439,7 @@ export default function Dashboard() {
       return
     }
 
-    const provider =
-      settings.backgroundType === "video"
-        ? settings.backgroundProvider === "pixabay"
-          ? "pixabay"
-          : "apple"
-        : ["bing", "unsplash", "pixabay", "notion"].includes(
-              settings.backgroundProvider
-            )
-          ? settings.backgroundProvider
-          : "bing"
+    const provider = getEffectiveBackgroundProvider(settings)
     const query =
       provider === "apple" || provider === "bing"
         ? ""
@@ -492,38 +539,42 @@ export default function Dashboard() {
         ? undefined
         : `${cacheKey}:${frequency}:${frequencyBucket}:${refreshTrigger}`
 
+    const fetchBingFallback = async () => {
+      try {
+        const res = await fetch(
+          "https://www.bing.com/HPImageArchive.aspx?format=js&idx=0&n=8&mkt=zh-CN"
+        )
+        const data = await res.json()
+        const images: BingImageItem[] = Array.isArray(data?.images)
+          ? data.images
+          : []
+        const image = pickBackgroundItem(images, stableSelectionSeed)
+        const path = image?.urlbase ? `${image.urlbase}_UHD.jpg` : image?.url
+
+        if (path) {
+          return createMediaCache({
+            image: new URL(path, "https://www.bing.com").toString(),
+            video: null,
+            videoFallback: null,
+            videoPoster: null
+          })
+        }
+      } catch (err) {
+        console.error("Failed to fetch Bing background:", err)
+      }
+
+      return createMediaCache({
+        image:
+          "https://images.unsplash.com/photo-1472214103451-9374bd1c798e?q=80&w=2560&auto=format&fit=crop",
+        video: null,
+        videoFallback: null,
+        videoPoster: null
+      })
+    }
+
     const fetchFreshBackground = async () => {
       if (provider === "bing" && settings.backgroundType === "image") {
-        try {
-          const res = await fetch(
-            "https://www.bing.com/HPImageArchive.aspx?format=js&idx=0&n=8&mkt=zh-CN"
-          )
-          const data = await res.json()
-          const images: BingImageItem[] = Array.isArray(data?.images)
-            ? data.images
-            : []
-          const image = pickBackgroundItem(images, stableSelectionSeed)
-          const path = image?.urlbase ? `${image.urlbase}_UHD.jpg` : image?.url
-
-          if (path) {
-            return createMediaCache({
-              image: new URL(path, "https://www.bing.com").toString(),
-              video: null,
-              videoFallback: null,
-              videoPoster: null
-            })
-          }
-        } catch (err) {
-          console.error("Failed to fetch Bing background:", err)
-        }
-
-        return createMediaCache({
-          image:
-            "https://images.unsplash.com/photo-1472214103451-9374bd1c798e?q=80&w=2560&auto=format&fit=crop",
-          video: null,
-          videoFallback: null,
-          videoPoster: null
-        })
+        return fetchBingFallback()
       }
 
       if (provider === "apple" && settings.backgroundType === "video") {
@@ -551,7 +602,7 @@ export default function Dashboard() {
       }
 
       if (provider === "unsplash" && settings.backgroundType === "image") {
-        if (!settings.unsplashAccessKey) return null
+        if (!settings.unsplashAccessKey) return fetchBingFallback()
 
         try {
           const res = await fetch(
@@ -576,11 +627,15 @@ export default function Dashboard() {
           console.error("Failed to fetch Unsplash background:", err)
         }
 
-        return null
+        return fetchBingFallback()
       }
 
       if (provider === "pixabay") {
-        if (!settings.pixabayApiKey) return null
+        if (!settings.pixabayApiKey) {
+          return settings.backgroundType === "video"
+            ? null
+            : fetchBingFallback()
+        }
 
         try {
           const endpoint =
@@ -633,30 +688,74 @@ export default function Dashboard() {
           console.error("Failed to fetch Pixabay background:", err)
         }
 
-        return null
+        return settings.backgroundType === "video" ? null : fetchBingFallback()
       }
 
-      if (provider === "notion" && settings.backgroundType === "image") {
+      if (provider === "local") {
+        try {
+          const localItem = await getRandomLocalMedia(
+            settings.backgroundType,
+            stableSelectionSeed
+          )
+          if (localItem) {
+            return createMediaCache({
+              image: localItem.isVideo ? null : localItem.url,
+              video: localItem.isVideo ? localItem.url : null,
+              videoFallback: localItem.isVideo ? localItem.url : null,
+              videoPoster: null
+            })
+          }
+        } catch (err) {
+          console.warn("[Dashboard] Failed to load local folder media:", err)
+        }
+
+        return settings.backgroundType === "video" ? null : fetchBingFallback()
+      }
+
+      if (provider === "notion") {
         if (
           !settings.backgroundNotionToken ||
           !settings.backgroundNotionDatabaseId
         ) {
-          return null
+          return settings.backgroundType === "video"
+            ? null
+            : fetchBingFallback()
         }
 
         try {
-          const image = await getNotionBackgroundImage(
+          const mediaUrl = await getNotionBackgroundImage(
             settings.backgroundNotionToken,
             settings.backgroundNotionDatabaseId,
             settings.backgroundNotionImageSource,
-            settings.backgroundNotionFilesProperty
+            settings.backgroundNotionFilesProperty,
+            stableSelectionSeed
           )
 
-          if (image) {
+          if (mediaUrl) {
+            const cleanUrl = mediaUrl.split("?")[0].toLowerCase()
+            const isVideo =
+              cleanUrl.endsWith(".mp4") ||
+              cleanUrl.endsWith(".webm") ||
+              cleanUrl.endsWith(".mov") ||
+              cleanUrl.includes("video")
+
+            let finalUrl = mediaUrl
+            // 如果开启了离线媒体缓存，优先使用本地缓存或在后台异步缓存
+            if (settings.enableMediaCache ?? true) {
+              try {
+                const localCachedUrl = await getMediaBlobUrl(mediaUrl)
+                if (localCachedUrl) {
+                  finalUrl = localCachedUrl
+                } else {
+                  void fetchAndCacheMedia(mediaUrl).catch(() => {})
+                }
+              } catch {}
+            }
+
             return createMediaCache({
-              image,
-              video: null,
-              videoFallback: null,
+              image: isVideo ? null : finalUrl,
+              video: isVideo ? finalUrl : null,
+              videoFallback: isVideo ? mediaUrl : null,
               videoPoster: null
             })
           }
@@ -664,17 +763,11 @@ export default function Dashboard() {
           console.error("Failed to fetch Notion background:", err)
         }
 
-        return null
+        return settings.backgroundType === "video" ? null : fetchBingFallback()
       }
 
       if (settings.backgroundType === "image") {
-        return createMediaCache({
-          image:
-            "https://images.unsplash.com/photo-1472214103451-9374bd1c798e?q=80&w=2560&auto=format&fit=crop",
-          video: null,
-          videoFallback: null,
-          videoPoster: null
-        })
+        return fetchBingFallback()
       }
 
       return null
@@ -694,7 +787,8 @@ export default function Dashboard() {
       const cached = cacheStore.entries?.[cacheKey]
       const needsChange = needsBackgroundChange(
         frequency,
-        cached?.lastChangedAt
+        cached?.lastChangedAt,
+        provider === "notion"
       )
       const shouldReuse =
         !shouldForceRefresh && cached?.cacheKey === cacheKey && !needsChange
@@ -763,7 +857,7 @@ export default function Dashboard() {
           video: media.video,
           image: media.image
         })
-      }, 800)
+      }, 0)
     }
 
     loadBackground()
@@ -827,10 +921,16 @@ export default function Dashboard() {
           poster={bgVideoPoster || undefined}
           autoPlay
           loop
-          muted={settings.muteVideo}
+          muted={settings.muteVideo ?? true}
           playsInline
           preload="auto"
+          onLoadedData={() => {
+            setIsVideoReady(true)
+          }}
           onCanPlay={() => {
+            setIsVideoReady(true)
+          }}
+          onPlaying={() => {
             setIsVideoReady(true)
           }}
           onError={() => {

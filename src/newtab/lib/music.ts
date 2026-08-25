@@ -1,9 +1,12 @@
 import {
+  fetchNotionPageTitle,
+  getFirstTitle,
   getNotionPropertyFileUrl,
   getNotionPropertyText,
   queryNotionSource,
   type NotionPage
 } from "./api"
+import { NOTION_VERSION, normalizeNotionId } from "./notion"
 import {
   defaultSettings,
   newTabStorage,
@@ -32,7 +35,7 @@ export type MusicLibraryResult = {
 }
 
 type MusicCache = {
-  version: 1
+  version: 2
   tokenHash: string
   databaseId: string
   mapping: string
@@ -83,7 +86,7 @@ function isValidCache(
 ): cache is MusicCache {
   return Boolean(
     cache &&
-      cache.version === 1 &&
+      cache.version === 2 &&
       cache.tokenHash === hashText(settings.musicNotionToken || "") &&
       cache.databaseId === settings.musicNotionDatabaseId &&
       cache.mapping === getMappingKey(settings) &&
@@ -103,7 +106,7 @@ async function setCachedResult(
 ) {
   const savedAt = Date.now()
   await newTabStorage.set(MUSIC_CACHE_KEY, {
-    version: 1,
+    version: 2,
     tokenHash: hashText(settings.musicNotionToken || ""),
     databaseId: settings.musicNotionDatabaseId,
     mapping: getMappingKey(settings),
@@ -121,10 +124,10 @@ function getPageCover(page: NotionPage): string {
   return cover.external?.url || cover.file?.url || ""
 }
 
-function mapMusicTrack(
+async function mapMusicTrack(
   page: NotionPage,
   settings: NewTabSettings
-): MusicTrack | null {
+): Promise<MusicTrack | null> {
   const properties = page.properties || {}
   const audio = getNotionPropertyFileUrl(
     properties[settings.musicAudioProperty || ""]
@@ -133,16 +136,33 @@ function mapMusicTrack(
 
   const title =
     getNotionPropertyText(properties[settings.musicTitleProperty || ""]) ||
+    getFirstTitle(properties) ||
     "Untitled"
-  const artist = getNotionPropertyText(
+  let artist = getNotionPropertyText(
     properties[settings.musicArtistProperty || ""]
   )
+
+  const artistProp = properties[settings.musicArtistProperty || ""]
+  if (!artist && artistProp?.relation?.length) {
+    try {
+      const titles = await Promise.all(
+        artistProp.relation.map((r) =>
+          r.id ? fetchNotionPageTitle(settings.musicNotionToken, r.id) : ""
+        )
+      )
+      artist = titles.filter(Boolean).join("、")
+    } catch {}
+  }
+
   const lrc = getNotionPropertyFileUrl(
     properties[settings.musicLyricsProperty || ""]
   )
   const cover =
-    getNotionPropertyFileUrl(properties[settings.musicCoverProperty || ""]) ||
-    getPageCover(page)
+    settings.musicCoverProperty === "__page_cover__"
+      ? getPageCover(page)
+      : getNotionPropertyFileUrl(
+          properties[settings.musicCoverProperty || ""]
+        ) || getPageCover(page)
 
   return {
     id: page.id,
@@ -187,9 +207,10 @@ export async function getNotionMusicTracks(
         start_cursor: options.cursor || undefined
       }
     )
-    const tracks = (response.results || [])
-      .map((page) => mapMusicTrack(page, settings))
-      .filter(Boolean) as MusicTrack[]
+    const rawTracks = await Promise.all(
+      (response.results || []).map((page) => mapMusicTrack(page, settings))
+    )
+    const tracks = rawTracks.filter(Boolean) as MusicTrack[]
     const result: MusicLibraryResult = {
       tracks,
       status: tracks.length > 0 ? "ready" : "empty",
@@ -221,10 +242,11 @@ export async function refreshMusicTrack(
     return null
   }
 
-  const response = await fetch(`https://api.notion.com/v1/pages/${id}`, {
+  const cleanId = normalizeNotionId(id)
+  const response = await fetch(`https://api.notion.com/v1/pages/${cleanId}`, {
     headers: {
       Authorization: `Bearer ${settings.musicNotionToken}`,
-      "Notion-Version": "2025-09-03"
+      "Notion-Version": NOTION_VERSION
     }
   })
 

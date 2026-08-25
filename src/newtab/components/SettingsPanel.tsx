@@ -1,8 +1,21 @@
-import { CircleHelp, Eye, EyeOff, RefreshCw, X } from "lucide-react"
+import {
+  AlertCircle,
+  CircleHelp,
+  Eye,
+  EyeOff,
+  FolderOpen,
+  HardDrive,
+  RefreshCw,
+  X
+} from "lucide-react"
 import React, { useEffect, useState } from "react"
+import toast from "react-hot-toast"
 
 import { fetchNotionProperties, type NotionPropertySchema } from "../lib/api"
+import { pickLocalFolder } from "../lib/localFolder"
+import { clearMediaCache, getMediaCacheStats } from "../lib/mediaCache"
 import { clearMusicPlayerCache } from "../lib/music"
+import { normalizeNotionId } from "../lib/notion"
 import {
   SYSTEM_FONT_STACK,
   useNewTabSettings,
@@ -124,24 +137,74 @@ function TextInput({
   )
 }
 
+function SecretInput({
+  value,
+  onChange,
+  placeholder = "Token 或 Key"
+}: {
+  value: string
+  onChange: (value: string) => void
+  placeholder?: string
+}) {
+  const [show, setShow] = useState(false)
+
+  return (
+    <div className="bg-base-200/50 rounded-lg px-2 flex items-center h-8 ml-4 min-w-0">
+      <input
+        type={show ? "text" : "password"}
+        className="input input-sm w-full max-w-[185px] text-[14px] bg-transparent focus:outline-none border-none font-normal px-1 text-right placeholder-base-content/30 tracking-tight"
+        placeholder={placeholder}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      <button
+        type="button"
+        className="btn btn-circle btn-xs btn-ghost h-6 min-h-6 w-6 p-0 text-base-content/50 hover:text-base-content flex-shrink-0 ml-1"
+        aria-label={show ? "隐藏内容" : "显示内容"}
+        title={show ? "隐藏" : "显示"}
+        onClick={() => setShow((v) => !v)}>
+        {show ? <EyeOff size={14} /> : <Eye size={14} />}
+      </button>
+    </div>
+  )
+}
+
 function PropertySelect({
   value,
   properties,
   onChange,
-  optional = false
+  optional = false,
+  allowPageCover = false,
+  filterTypes
 }: {
   value: string
   properties: NotionPropertySchema[]
   onChange: (value: string) => void
   optional?: boolean
+  allowPageCover?: boolean
+  filterTypes?: string[]
 }) {
+  const filtered = filterTypes
+    ? properties.filter((p) => filterTypes.includes(p.type))
+    : properties
+
   return (
     <SelectBox value={value} onChange={onChange}>
       {optional && <option value="">不选择</option>}
-      {!properties.length && (
-        <option value={value}>{value || "未读取到字段"}</option>
+      {allowPageCover && (
+        <option value="__page_cover__">页面封面</option>
       )}
-      {properties.map((property) => (
+      {!filtered.length && !allowPageCover && (
+        <option value={value}>
+          {value ||
+            (filterTypes
+              ? properties.length > 0
+                ? `未找到对应属性(库内有${properties.length}个属性)`
+                : "未找到对应属性"
+              : "未读取到属性")}
+        </option>
+      )}
+      {filtered.map((property) => (
         <option key={property.name} value={property.name}>
           {property.name}
         </option>
@@ -154,7 +217,6 @@ export default function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
   const [settings, setSettings] = useNewTabSettings()
   const [clearingCache, setClearingCache] = useState(false)
   const [clearedCache, setClearedCache] = useState(false)
-  const [showWereadKey, setShowWereadKey] = useState(false)
   const [loadingSchema, setLoadingSchema] = useState<NotionSchemaTarget | null>(
     null
   )
@@ -168,13 +230,86 @@ export default function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
     NotionPropertySchema[]
   >([])
 
+  const [schemaErrors, setSchemaErrors] = useState<
+    Record<NotionSchemaTarget, string | null>
+  >({
+    background: null,
+    notes: null,
+    music: null
+  })
+
+  const [mediaStats, setMediaStats] = useState<{
+    count: number
+    formattedSize: string
+  }>({ count: 0, formattedSize: "0 MB" })
+  const [clearingMediaCache, setClearingMediaCache] = useState(false)
+
+  const refreshMediaCacheStats = async () => {
+    const stats = await getMediaCacheStats()
+    setMediaStats({
+      count: stats.count,
+      formattedSize: stats.formattedSize
+    })
+  }
+
+  useEffect(() => {
+    if (isOpen) {
+      void refreshMediaCacheStats()
+    }
+  }, [isOpen])
+
   if (!settings) return null
 
   const updateSetting = <K extends keyof NewTabSettings>(
     key: K,
     value: NewTabSettings[K]
   ) => {
-    setSettings((prev) => ({ ...prev!, [key]: value }))
+    setSettings((prev) => {
+      if (!prev) return prev
+      const isBgKey =
+        key.toString().startsWith("background") ||
+        key.toString().startsWith("localFolder") ||
+        key === "enableMediaCache" ||
+        key === "unsplashAccessKey" ||
+        key === "pixabayApiKey"
+      return {
+        ...prev,
+        [key]: value,
+        ...(isBgKey ? { backgroundRefreshTrigger: Date.now() } : {})
+      }
+    })
+  }
+
+  const handlePickFolder = async () => {
+    try {
+      const result = await pickLocalFolder()
+      if (result) {
+        setSettings((prev) => {
+          if (!prev) return prev
+          return {
+            ...prev,
+            localFolderName: result.name,
+            localFolderMediaCount: result.count,
+            backgroundProvider: "local",
+            backgroundRefreshTrigger: Date.now()
+          }
+        })
+        toast.success(
+          `已绑定本地文件夹: ${result.name} (找到 ${result.count} 个媒体文件)`
+        )
+      }
+    } catch (err: any) {
+      console.warn("Pick folder failed:", err)
+      toast.error(err?.message || "选择文件夹失败")
+    }
+  }
+
+  const handleClearMediaCache = async () => {
+    setClearingMediaCache(true)
+    await clearMediaCache()
+    await refreshMediaCacheStats()
+    setClearingMediaCache(false)
+    toast.success("已清空本地离线媒体缓存")
   }
 
   const handleClearCache = async () => {
@@ -205,6 +340,28 @@ export default function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
     })
   }
 
+  const handleDatabaseIdChange = (
+    key:
+      | "backgroundNotionDatabaseId"
+      | "notesNotionDatabaseId"
+      | "musicNotionDatabaseId",
+    rawVal: string
+  ) => {
+    const clean = rawVal.trim()
+    if (
+      clean.includes("http") ||
+      clean.includes("notion.") ||
+      clean.includes("?") ||
+      clean.includes("#") ||
+      clean.includes("-")
+    ) {
+      const normalized = normalizeNotionId(clean)
+      updateSetting(key, normalized || clean)
+    } else {
+      updateSetting(key, clean)
+    }
+  }
+
   const getSchemaCredentials = (target: NotionSchemaTarget) => {
     const token =
       target === "background"
@@ -212,7 +369,7 @@ export default function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
         : target === "notes"
           ? settings.notesNotionToken
           : settings.musicNotionToken
-    const databaseId =
+    const rawDatabaseId =
       target === "background"
         ? settings.backgroundNotionDatabaseId
         : target === "notes"
@@ -221,7 +378,7 @@ export default function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
 
     return {
       token: token.trim(),
-      databaseId: databaseId.trim()
+      databaseId: normalizeNotionId(rawDatabaseId)
     }
   }
 
@@ -231,23 +388,72 @@ export default function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
     if (target === "music") setMusicProperties([])
   }
 
-  const loadSchema = async (target: NotionSchemaTarget) => {
+  const loadSchema = async (target: NotionSchemaTarget, showToast = false) => {
     const { token, databaseId } = getSchemaCredentials(target)
 
     if (!token || !databaseId) {
       clearProperties(target)
+      setSchemaErrors((prev) => ({ ...prev, [target]: null }))
       return
     }
 
     setLoadingSchema(target)
+    setSchemaErrors((prev) => ({ ...prev, [target]: null }))
     try {
       const properties = await fetchNotionProperties(token, databaseId)
-      if (target === "background") setBackgroundProperties(properties)
-      if (target === "notes") setNotesProperties(properties)
-      if (target === "music") setMusicProperties(properties)
+      if (target === "background") {
+        setBackgroundProperties(properties)
+        const fileProp = properties.find(
+          (p) => p.type === "files" || p.type === "url"
+        )
+        if (fileProp && !settings.backgroundNotionFilesProperty) {
+          updateSetting("backgroundNotionFilesProperty", fileProp.name)
+        }
+      }
+      if (target === "notes") {
+        setNotesProperties(properties)
+        const contentProp = properties.find(
+          (p) => p.type === "rich_text" || p.type === "title"
+        )
+        if (contentProp && !settings.notesContentProperty) {
+          updateSetting("notesContentProperty", contentProp.name)
+        }
+      }
+      if (target === "music") {
+        setMusicProperties(properties)
+        const titleProp = properties.find(
+          (p) =>
+            p.type === "title" ||
+            p.name.includes("歌") ||
+            p.name.toLowerCase().includes("title") ||
+            p.name.toLowerCase().includes("name")
+        )
+        const audioProp = properties.find(
+          (p) =>
+            p.type === "files" ||
+            p.name.includes("音频") ||
+            p.name.toLowerCase().includes("audio") ||
+            p.name.toLowerCase().includes("file")
+        )
+        if (titleProp && !settings.musicTitleProperty) {
+          updateSetting("musicTitleProperty", titleProp.name)
+        }
+        if (audioProp && !settings.musicAudioProperty) {
+          updateSetting("musicAudioProperty", audioProp.name)
+        }
+      }
+      if (showToast) {
+        toast.success(`成功读取 ${properties.length} 个属性`)
+      }
     } catch (error) {
+      const errorMsg =
+        error instanceof Error ? error.message : "读取 Notion 数据库失败"
       console.warn("[NotionHub Tab] Failed to load Notion schema:", error)
       clearProperties(target)
+      setSchemaErrors((prev) => ({ ...prev, [target]: errorMsg }))
+      if (showToast) {
+        toast.error(errorMsg)
+      }
     } finally {
       setLoadingSchema(null)
     }
@@ -257,7 +463,9 @@ export default function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
     settings.backgroundType === "video"
       ? settings.backgroundProvider === "pixabay"
         ? "pixabay"
-        : "apple"
+        : settings.backgroundProvider === "notion"
+          ? "notion"
+          : "apple"
       : ["bing", "unsplash", "pixabay", "notion"].includes(
             settings.backgroundProvider
           )
@@ -453,6 +661,8 @@ export default function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
                   <>
                     <option value="apple">Apple</option>
                     <option value="pixabay">Pixabay</option>
+                    <option value="notion">Notion</option>
+                    <option value="local">📁 本地文件夹</option>
                   </>
                 ) : (
                   <>
@@ -460,10 +670,49 @@ export default function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
                     <option value="unsplash">Unsplash</option>
                     <option value="pixabay">Pixabay</option>
                     <option value="notion">Notion</option>
+                    <option value="local">📁 本地文件夹</option>
                   </>
                 )}
               </SelectBox>
             </Row>
+            {backgroundProvider === "local" && (
+              <>
+                <Row label="本地文件夹">
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-ghost bg-base-200/60 hover:bg-base-200 font-normal px-3 flex items-center gap-1.5"
+                      onClick={handlePickFolder}>
+                      <FolderOpen size={15} />
+                      <span className="max-w-[150px] truncate">
+                        {settings.localFolderName
+                          ? settings.localFolderName
+                          : "选择本地文件夹"}
+                      </span>
+                    </button>
+                  </div>
+                </Row>
+                {settings.localFolderName ? (
+                  <div className="px-4 py-2 text-xs text-base-content/60 bg-base-200/30 flex items-center justify-between">
+                    <span>
+                      📂 目录内已扫描到{" "}
+                      <strong>{settings.localFolderMediaCount ?? 0}</strong>{" "}
+                      个支持的媒体文件
+                    </span>
+                    <button
+                      type="button"
+                      className="text-xs text-primary hover:underline"
+                      onClick={handlePickFolder}>
+                      更换文件夹
+                    </button>
+                  </div>
+                ) : (
+                  <div className="px-4 py-2 text-xs text-amber-500/90 bg-amber-500/10">
+                    💡 请点击上方按钮选择包含视频（.mp4/.mov）或图片（.jpg/.png）的本地文件夹
+                  </div>
+                )}
+              </>
+            )}
             {["unsplash", "pixabay"].includes(backgroundProvider) && (
               <>
                 <Row label="搜索关键字">
@@ -476,33 +725,48 @@ export default function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
                   />
                 </Row>
                 {backgroundProvider === "unsplash" && (
-                  <Row label="Unsplash Key">
-                    <TextInput
-                      value={settings.unsplashAccessKey}
-                      placeholder="Access Key"
-                      onChange={(value) =>
-                        updateSetting("unsplashAccessKey", value)
-                      }
-                    />
-                  </Row>
+                  <>
+                    <Row label="Unsplash Key">
+                      <SecretInput
+                        value={settings.unsplashAccessKey}
+                        placeholder="Access Key"
+                        onChange={(value) =>
+                          updateSetting("unsplashAccessKey", value)
+                        }
+                      />
+                    </Row>
+                    {!settings.unsplashAccessKey?.trim() && (
+                      <div className="px-4 py-2 text-xs text-base-content/50 bg-base-200/30">
+                        💡 未填写 Access Key 时，将自动展示 Bing 每日壁纸
+                      </div>
+                    )}
+                  </>
                 )}
                 {backgroundProvider === "pixabay" && (
-                  <Row label="Pixabay Key">
-                    <TextInput
-                      value={settings.pixabayApiKey}
-                      placeholder="API Key"
-                      onChange={(value) =>
-                        updateSetting("pixabayApiKey", value)
-                      }
-                    />
-                  </Row>
+                  <>
+                    <Row label="Pixabay Key">
+                      <SecretInput
+                        value={settings.pixabayApiKey}
+                        placeholder="API Key"
+                        onChange={(value) =>
+                          updateSetting("pixabayApiKey", value)
+                        }
+                      />
+                    </Row>
+                    {!settings.pixabayApiKey?.trim() && (
+                      <div className="px-4 py-2 text-xs text-base-content/50 bg-base-200/30">
+                        💡 未填写 API Key 时，将自动展示默认
+                        {settings.backgroundType === "video" ? "视频" : "壁纸"}
+                      </div>
+                    )}
+                  </>
                 )}
               </>
             )}
             {backgroundProvider === "notion" && (
               <>
                 <Row label="Notion Token">
-                  <TextInput
+                  <SecretInput
                     value={settings.backgroundNotionToken}
                     placeholder="ntn_..."
                     onChange={(value) =>
@@ -511,14 +775,46 @@ export default function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
                   />
                 </Row>
                 <Row label="数据库 ID">
-                  <TextInput
-                    value={settings.backgroundNotionDatabaseId}
-                    placeholder="Database ID"
-                    onChange={(value) =>
-                      updateSetting("backgroundNotionDatabaseId", value)
-                    }
-                  />
+                  <div className="flex items-center gap-2">
+                    <TextInput
+                      value={settings.backgroundNotionDatabaseId}
+                      placeholder="Database ID 或 Notion 链接"
+                      onChange={(value) =>
+                        handleDatabaseIdChange(
+                          "backgroundNotionDatabaseId",
+                          value
+                        )
+                      }
+                    />
+                    <button
+                      type="button"
+                      className="btn btn-circle btn-xs btn-ghost h-8 min-h-8 w-8 p-0 text-base-content/60 hover:text-base-content flex-shrink-0"
+                      title="读取/刷新属性结构"
+                      disabled={loadingSchema === "background"}
+                      onClick={() => void loadSchema("background", true)}>
+                      <RefreshCw
+                        size={14}
+                        className={
+                          loadingSchema === "background" ? "animate-spin" : ""
+                        }
+                      />
+                    </button>
+                  </div>
                 </Row>
+                {schemaErrors.background && (
+                  <div className="mx-4 my-2 p-3 rounded-xl bg-error/10 border border-error/20 text-error text-xs flex items-start gap-2">
+                    <AlertCircle size={15} className="flex-shrink-0 mt-0.5" />
+                    <div className="flex-1 leading-relaxed">
+                      {schemaErrors.background}
+                    </div>
+                  </div>
+                )}
+                {(!settings.backgroundNotionToken?.trim() ||
+                  !settings.backgroundNotionDatabaseId?.trim()) && (
+                  <div className="px-4 py-2 text-xs text-base-content/50 bg-base-200/30">
+                    💡 未填写完整凭证时，将自动展示 Bing 每日壁纸
+                  </div>
+                )}
                 <Row label="图片来源">
                   <SelectBox
                     value={settings.backgroundNotionImageSource}
@@ -534,21 +830,27 @@ export default function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
                 </Row>
                 {settings.backgroundNotionImageSource === "files" && (
                   <>
-                    {renderSchemaStatus("background")}
-                    {backgroundProperties.length > 0 && (
-                      <Row label="文件属性">
-                        <PropertySelect
-                          value={settings.backgroundNotionFilesProperty}
-                          properties={backgroundProperties}
-                          onChange={(value) =>
-                            updateSetting(
-                              "backgroundNotionFilesProperty",
-                              value
-                            )
-                          }
-                        />
-                      </Row>
-                    )}
+                    <Row label="文件">
+                      <PropertySelect
+                        value={settings.backgroundNotionFilesProperty}
+                        properties={backgroundProperties}
+                        filterTypes={["files", "url"]}
+                        onChange={(value) =>
+                          updateSetting(
+                            "backgroundNotionFilesProperty",
+                            value
+                          )
+                        }
+                      />
+                    </Row>
+                    {backgroundProperties.length > 0 &&
+                      !backgroundProperties.some(
+                        (p) => p.type === "files" || p.type === "url"
+                      ) && (
+                        <div className="mx-4 my-2 p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-500 text-xs leading-relaxed">
+                          💡 该数据库暂无 <strong>Files（文件与媒体）</strong> 属性。若要直接使用封面，请将「图片来源」切换为 <strong>页面封面</strong>；或在 Notion 数据库中新增一个 Files 属性并上传图片。
+                        </div>
+                      )}
                   </>
                 )}
               </>
@@ -633,6 +935,34 @@ export default function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
                 }
               />
             </Row>
+            <Row label="离线媒体缓存">
+              <input
+                type="checkbox"
+                className="bonjourr-switch"
+                checked={settings.enableMediaCache ?? true}
+                onChange={(e) =>
+                  updateSetting("enableMediaCache", e.target.checked)
+                }
+              />
+            </Row>
+            {(settings.enableMediaCache ?? true) && (
+              <Row label="离线缓存管理">
+                <div className="flex items-center gap-2.5">
+                  <span className="text-xs text-base-content/50">
+                    {mediaStats.count > 0
+                      ? `${mediaStats.count} 个文件 (${mediaStats.formattedSize})`
+                      : "暂无缓存"}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn btn-xs btn-ghost text-red-500 hover:bg-red-500/10 font-normal px-2"
+                    onClick={handleClearMediaCache}
+                    disabled={clearingMediaCache || mediaStats.count === 0}>
+                    {clearingMediaCache ? "清理中..." : "清空缓存"}
+                  </button>
+                </div>
+              </Row>
+            )}
           </Card>
 
           <SectionTitle>笔记</SectionTitle>
@@ -653,14 +983,14 @@ export default function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
                 onChange={(value) =>
                   updateSetting("notesSource", value as NotesSource)
                 }>
-                <option value="notion">Notion 数据库</option>
+                <option value="notion">Notion</option>
                 <option value="weread">微信读书</option>
               </SelectBox>
             </Row>
             {settings.notesSource === "notion" ? (
               <>
                 <Row label="Notion Token">
-                  <TextInput
+                  <SecretInput
                     value={settings.notesNotionToken}
                     placeholder="ntn_..."
                     onChange={(value) =>
@@ -669,61 +999,109 @@ export default function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
                   />
                 </Row>
                 <Row label="数据库 ID">
-                  <TextInput
-                    value={settings.notesNotionDatabaseId}
-                    placeholder="Database ID"
-                    onChange={(value) =>
-                      updateSetting("notesNotionDatabaseId", value)
-                    }
-                  />
+                  <div className="flex items-center gap-2">
+                    <TextInput
+                      value={settings.notesNotionDatabaseId}
+                      placeholder="Database ID 或 Notion 链接"
+                      onChange={(value) =>
+                        handleDatabaseIdChange("notesNotionDatabaseId", value)
+                      }
+                    />
+                    <button
+                      type="button"
+                      className="btn btn-circle btn-xs btn-ghost h-8 min-h-8 w-8 p-0 text-base-content/60 hover:text-base-content flex-shrink-0"
+                      title="读取/刷新属性结构"
+                      disabled={loadingSchema === "notes"}
+                      onClick={() => void loadSchema("notes", true)}>
+                      <RefreshCw
+                        size={14}
+                        className={
+                          loadingSchema === "notes" ? "animate-spin" : ""
+                        }
+                      />
+                    </button>
+                  </div>
                 </Row>
-                {renderSchemaStatus("notes")}
+                {schemaErrors.notes && (
+                  <div className="mx-4 my-2 p-3 rounded-xl bg-error/10 border border-error/20 text-error text-xs flex items-start gap-2">
+                    <AlertCircle size={15} className="flex-shrink-0 mt-0.5" />
+                    <div className="flex-1 leading-relaxed">
+                      {schemaErrors.notes}
+                    </div>
+                  </div>
+                )}
                 {notesProperties.length > 0 && (
                   <>
-                    <Row label="内容属性">
+                    <Row label="内容">
                       <PropertySelect
                         value={settings.notesContentProperty}
                         properties={notesProperties}
+                        filterTypes={["title", "rich_text", "formula"]}
                         onChange={(value) =>
                           updateSetting("notesContentProperty", value)
                         }
                       />
                     </Row>
-                    <Row label="标题属性">
+                    <Row label="标题">
                       <PropertySelect
                         optional
                         value={settings.notesTitleProperty}
                         properties={notesProperties}
+                        filterTypes={[
+                          "title",
+                          "rich_text",
+                          "select",
+                          "formula"
+                        ]}
                         onChange={(value) =>
                           updateSetting("notesTitleProperty", value)
                         }
                       />
                     </Row>
-                    <Row label="来源属性">
+                    <Row label="来源">
                       <PropertySelect
                         optional
                         value={settings.notesSourceProperty}
                         properties={notesProperties}
+                        filterTypes={[
+                          "title",
+                          "rich_text",
+                          "select",
+                          "multi_select",
+                          "relation",
+                          "rollup",
+                          "people",
+                          "formula",
+                          "url"
+                        ]}
                         onChange={(value) =>
                           updateSetting("notesSourceProperty", value)
                         }
                       />
                     </Row>
-                    <Row label="日期属性">
+                    <Row label="日期">
                       <PropertySelect
                         optional
                         value={settings.notesDateProperty}
                         properties={notesProperties}
+                        filterTypes={[
+                          "date",
+                          "created_time",
+                          "last_edited_time",
+                          "formula"
+                        ]}
                         onChange={(value) =>
                           updateSetting("notesDateProperty", value)
                         }
                       />
                     </Row>
-                    <Row label="封面属性">
+                    <Row label="封面">
                       <PropertySelect
                         optional
+                        allowPageCover
                         value={settings.notesCoverProperty}
                         properties={notesProperties}
+                        filterTypes={["files", "url"]}
                         onChange={(value) =>
                           updateSetting("notesCoverProperty", value)
                         }
@@ -731,42 +1109,45 @@ export default function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
                     </Row>
                   </>
                 )}
+                {(!settings.notesNotionToken?.trim() ||
+                  !settings.notesNotionDatabaseId?.trim() ||
+                  !settings.notesContentProperty?.trim()) && (
+                  <div className="px-4 py-2 text-xs text-base-content/50 bg-base-200/30">
+                    💡 未填写完整 Notion 凭证与内容属性时，不会在主界面显示笔记
+                  </div>
+                )}
               </>
             ) : (
-              <Row label="微信读书 Key">
-                <div className="flex items-center gap-2 min-w-0">
-                  <TextInput
-                    value={settings.wereadApiKey}
-                    placeholder="wrk-..."
-                    type={showWereadKey ? "text" : "password"}
-                    onChange={(value) => updateSetting("wereadApiKey", value)}
-                  />
-                  <button
-                    type="button"
-                    className="btn btn-circle btn-xs btn-ghost h-8 min-h-8 w-8 p-0 text-base-content/60 hover:text-base-content"
-                    aria-label={
-                      showWereadKey ? "隐藏微信读书 Key" : "显示微信读书 Key"
-                    }
-                    title={showWereadKey ? "隐藏 Key" : "显示 Key"}
-                    onClick={() => setShowWereadKey((value) => !value)}>
-                    {showWereadKey ? <EyeOff size={16} /> : <Eye size={16} />}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-circle btn-xs btn-ghost h-8 min-h-8 w-8 p-0 text-base-content/60 hover:text-base-content"
-                    aria-label="查看微信读书 Key 文档"
-                    title="查看文档"
-                    onClick={() =>
-                      window.open(
-                        "https://www.notionhub.app/docs/weread.html",
-                        "_blank",
-                        "noopener,noreferrer"
-                      )
-                    }>
-                    <CircleHelp size={16} />
-                  </button>
-                </div>
-              </Row>
+              <>
+                <Row label="微信读书 Key">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <SecretInput
+                      value={settings.wereadApiKey}
+                      placeholder="wrk-..."
+                      onChange={(value) => updateSetting("wereadApiKey", value)}
+                    />
+                    <button
+                      type="button"
+                      className="btn btn-circle btn-xs btn-ghost h-8 min-h-8 w-8 p-0 text-base-content/60 hover:text-base-content"
+                      aria-label="查看微信读书 Key 文档"
+                      title="查看文档"
+                      onClick={() =>
+                        window.open(
+                          "https://www.notionhub.app/docs/weread.html",
+                          "_blank",
+                          "noopener,noreferrer"
+                        )
+                      }>
+                      <CircleHelp size={16} />
+                    </button>
+                  </div>
+                </Row>
+                {!settings.wereadApiKey?.trim() && (
+                  <div className="px-4 py-2 text-xs text-base-content/50 bg-base-200/30">
+                    💡 未填写微信读书 Key 时，不会在主界面显示划线
+                  </div>
+                )}
+              </>
             )}
             <Row label="显示封面">
               <input
@@ -853,7 +1234,7 @@ export default function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
             {(settings.showMusicPlayer ?? false) && (
               <>
                 <Row label="Notion Token">
-                  <TextInput
+                  <SecretInput
                     value={settings.musicNotionToken}
                     placeholder="ntn_..."
                     onChange={(value) =>
@@ -862,66 +1243,119 @@ export default function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
                   />
                 </Row>
                 <Row label="数据库 ID">
-                  <TextInput
-                    value={settings.musicNotionDatabaseId}
-                    placeholder="Database ID"
-                    onChange={(value) =>
-                      updateSetting("musicNotionDatabaseId", value)
-                    }
-                  />
+                  <div className="flex items-center gap-2">
+                    <TextInput
+                      value={settings.musicNotionDatabaseId}
+                      placeholder="Database ID 或 Notion 链接"
+                      onChange={(value) =>
+                        handleDatabaseIdChange("musicNotionDatabaseId", value)
+                      }
+                    />
+                    <button
+                      type="button"
+                      className="btn btn-circle btn-xs btn-ghost h-8 min-h-8 w-8 p-0 text-base-content/60 hover:text-base-content flex-shrink-0"
+                      title="读取/刷新属性结构"
+                      disabled={loadingSchema === "music"}
+                      onClick={() => void loadSchema("music", true)}>
+                      <RefreshCw
+                        size={14}
+                        className={
+                          loadingSchema === "music" ? "animate-spin" : ""
+                        }
+                      />
+                    </button>
+                  </div>
                 </Row>
-                {renderSchemaStatus("music")}
+                {schemaErrors.music && (
+                  <div className="mx-4 my-2 p-3 rounded-xl bg-error/10 border border-error/20 text-error text-xs flex items-start gap-2">
+                    <AlertCircle size={15} className="flex-shrink-0 mt-0.5" />
+                    <div className="flex-1 leading-relaxed">
+                      {schemaErrors.music}
+                    </div>
+                  </div>
+                )}
                 {musicProperties.length > 0 && (
                   <>
-                    <Row label="歌曲属性">
+                    <Row label="歌曲">
                       <PropertySelect
                         value={settings.musicTitleProperty}
                         properties={musicProperties}
+                        filterTypes={[
+                          "title",
+                          "rich_text",
+                          "formula",
+                          "select"
+                        ]}
                         onChange={(value) =>
                           updateSetting("musicTitleProperty", value)
                         }
                       />
                     </Row>
-                    <Row label="音频属性">
+                    <Row label="音频">
                       <PropertySelect
                         value={settings.musicAudioProperty}
                         properties={musicProperties}
+                        filterTypes={["files", "url"]}
                         onChange={(value) =>
                           updateSetting("musicAudioProperty", value)
                         }
                       />
                     </Row>
-                    <Row label="歌词属性">
+                    <Row label="歌词">
                       <PropertySelect
                         optional
                         value={settings.musicLyricsProperty}
                         properties={musicProperties}
+                        filterTypes={["files", "url", "rich_text"]}
                         onChange={(value) =>
                           updateSetting("musicLyricsProperty", value)
                         }
                       />
                     </Row>
-                    <Row label="封面属性">
+                    <Row label="封面">
                       <PropertySelect
                         optional
+                        allowPageCover
                         value={settings.musicCoverProperty}
                         properties={musicProperties}
+                        filterTypes={["files", "url"]}
                         onChange={(value) =>
                           updateSetting("musicCoverProperty", value)
                         }
                       />
                     </Row>
-                    <Row label="歌手属性">
+                    <Row label="歌手">
                       <PropertySelect
                         optional
                         value={settings.musicArtistProperty}
                         properties={musicProperties}
+                        filterTypes={[
+                          "relation",
+                          "rollup",
+                          "people",
+                          "rich_text",
+                          "title",
+                          "select",
+                          "multi_select",
+                          "formula",
+                          "status",
+                          "email",
+                          "phone_number"
+                        ]}
                         onChange={(value) =>
                           updateSetting("musicArtistProperty", value)
                         }
                       />
                     </Row>
                   </>
+                )}
+                {(!settings.musicNotionToken?.trim() ||
+                  !settings.musicNotionDatabaseId?.trim() ||
+                  !settings.musicTitleProperty?.trim() ||
+                  !settings.musicAudioProperty?.trim()) && (
+                  <div className="px-4 py-2 text-xs text-base-content/50 bg-base-200/30">
+                    💡 未填写完整 Notion 凭证与歌曲/音频属性时，播放器不会在主界面显示
+                  </div>
                 )}
                 <Row label="背景模糊度">
                   <input

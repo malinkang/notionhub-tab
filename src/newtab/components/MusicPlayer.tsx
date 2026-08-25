@@ -95,6 +95,16 @@ async function loadAPlayer(): Promise<APlayerConstructor> {
   }
 }
 
+function isMusicConfigured(settings?: any): boolean {
+  if (!settings || !settings.showMusicPlayer) return false
+  return Boolean(
+    settings.musicNotionToken?.trim() &&
+    settings.musicNotionDatabaseId?.trim() &&
+    settings.musicTitleProperty?.trim() &&
+    settings.musicAudioProperty?.trim()
+  )
+}
+
 export default function MusicPlayer() {
   const [settings] = useNewTabSettings()
   const [tracks, setTracks] = useState<MusicTrack[]>([])
@@ -114,7 +124,7 @@ export default function MusicPlayer() {
   const refreshingTrackIdsRef = useRef(new Set<string>())
   const retriedTrackIdsRef = useRef(new Set<string>())
 
-  const enabled = settings?.showMusicPlayer ?? false
+  const enabled = isMusicConfigured(settings)
   const hasTracks = tracks.length > 0
   const showStatusCard =
     Boolean(message) ||

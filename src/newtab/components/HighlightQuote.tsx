@@ -8,6 +8,21 @@ import {
 } from "../lib/api"
 import { useNewTabSettings } from "../lib/settingsStore"
 
+function isNotesConfigured(settings?: any): boolean {
+  if (!settings || !settings.showHighlights) return false
+  if (settings.notesSource === "weread") {
+    return Boolean(settings.wereadApiKey?.trim())
+  }
+  if (settings.notesSource === "notion") {
+    return Boolean(
+      settings.notesNotionToken?.trim() &&
+      settings.notesNotionDatabaseId?.trim() &&
+      settings.notesContentProperty?.trim()
+    )
+  }
+  return false
+}
+
 export default function HighlightQuote() {
   const [highlight, setHighlight] = useState<Highlight | null>(null)
   const [result, setResult] = useState<HighlightResult | null>(null)
@@ -15,6 +30,13 @@ export default function HighlightQuote() {
   const [settings] = useNewTabSettings()
 
   const refreshHighlight = async () => {
+    if (!isNotesConfigured(settings)) {
+      setLoading(false)
+      setResult(null)
+      setHighlight(null)
+      return
+    }
+
     setLoading(true)
     try {
       const res = await getRandomHighlightResult()
@@ -30,7 +52,12 @@ export default function HighlightQuote() {
   }
 
   useEffect(() => {
-    if (!settings) return
+    if (!settings || !isNotesConfigured(settings)) {
+      setLoading(false)
+      setHighlight(null)
+      setResult(null)
+      return
+    }
 
     const timer = window.setTimeout(() => {
       refreshHighlight()
@@ -55,10 +82,8 @@ export default function HighlightQuote() {
     window.location.href = highlight.notionUrl
   }
 
-  if (!settings) {
-    return (
-      <div className="h-[168px] min-h-[168px] opacity-0 transition-opacity duration-300"></div>
-    )
+  if (!settings || !isNotesConfigured(settings)) {
+    return null
   }
 
   const showCover = settings.showHighlightCover ?? true

@@ -17,6 +17,7 @@ export type BackgroundProvider =
   | "unsplash"
   | "pixabay"
   | "notion"
+  | "local"
 export type NotionImageSource = "cover" | "files"
 export type NotesSource = "notion" | "weread"
 
@@ -40,6 +41,10 @@ export interface NewTabSettings {
   backgroundNotionDatabaseId: string
   backgroundNotionImageSource: NotionImageSource
   backgroundNotionFilesProperty: string
+
+  enableMediaCache: boolean
+  localFolderName?: string
+  localFolderMediaCount?: number
 
   showMusicPlayer: boolean
   musicPlayerBgBlur: number
@@ -105,6 +110,10 @@ export const defaultSettings: NewTabSettings = {
   backgroundNotionDatabaseId: "",
   backgroundNotionImageSource: "cover",
   backgroundNotionFilesProperty: "",
+
+  enableMediaCache: true,
+  localFolderName: "",
+  localFolderMediaCount: 0,
 
   showMusicPlayer: false,
   musicPlayerBgBlur: 24,
